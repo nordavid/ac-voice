@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="de">
+<head>
+	<meta charset="utf-8" />
+	<title>AC Voice</title>
+	<style>
+		:root { color-scheme: dark; }
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			padding: 10px 14px 14px;
+			background: #2d2d2d;
+			color: #d8d8d8;
+			font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+		}
+		.row { display: flex; align-items: center; gap: 10px; min-height: 28px; margin: 2px 0 8px; }
+		.key { flex: 0 0 82px; text-align: right; color: #9a9a9a; }
+		.val { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+		.dot { width: 9px; height: 9px; border-radius: 50%; background: #5b6573; flex: 0 0 auto; }
+		.dot.online { background: #3ddc84; }
+		.dot.launching { background: #3fd0ff; }
+		.dot.busy { background: #ffb547; }
+		.dot.error { background: #ff5c5c; }
+		h2 { margin: 14px 0 4px 92px; font-size: 12px; font-weight: 600; color: #bdbdbd; }
+		p, ul { margin: 0 0 6px 92px; color: #a8a8a8; font-size: 12px; }
+		ul { padding-left: 16px; }
+		li { margin: 1px 0; }
+		.foot { margin-top: 12px; color: #767676; font-size: 11px; }
+	</style>
+</head>
+<body>
+	<div class="row">
+		<span class="key">Status</span>
+		<div class="val"><span id="dot" class="dot"></span><span id="status">Suche die App</span></div>
+	</div>
+
+	<h2>So funktioniert die Taste</h2>
+	<p>Tippe auf die Taste und sprich. AC Voice erkennt das Satzende selbst.</p>
+	<p>Halte die Taste beim Sprechen. Lass sie los, wenn du fertig bist.</p>
+	<p>Nach dem Sprechen schließt ein zweiter Druck sofort ab. Vorher bricht er ab.</p>
+	<p>Mit Esc brichst du jederzeit ab und schließt das Overlay. Eine Seite, die Chrome schon öffnet, erscheint trotzdem.</p>
+	<p>Bei mehreren Treffern zeigt AC Voice eine nummerierte Liste. Sag die Nummer oder den Namen. Du kannst auch eine Zeile anklicken. Drück die Taste, um abzubrechen.</p>
+
+	<h2>Beispiele</h2>
+	<ul>
+		<li>„Öffne das WWT-Projekt“</li>
+		<li>„WWT Relaunch“</li>
+		<li>„Öffne WWT Ticket 412“</li>
+		<li>„Ticket 47285“</li>
+		<li>„Meine Aufgaben“</li>
+	</ul>
+
+	<p class="foot">Ohne Stream Deck startest du die Spracheingabe mit ⌃⌥Leertaste. Läuft die App nicht, startet ein Tastendruck sie im Hintergrund.</p>
+	<p class="foot" id="version"></p>
+
+	<script>
+		// German labels for the link status the plugin sends (src/plugin.ts, inspectorStatus()).
+		const LABELS = {
+			online: "Verbunden",
+			busy: "Verbunden. AC Voice antwortet gerade nicht.",
+			launching: "App startet",
+			offline: "App läuft nicht. Ein Tastendruck startet sie.",
+			missing: "App nicht gefunden. Installiere AC Voice in deinem Programme-Ordner.",
+		};
+		const dot = document.getElementById("dot");
+		const statusEl = document.getElementById("status");
+		const versionEl = document.getElementById("version");
+
+		function show(p) {
+			const missing = p.link === "offline" && p.error;
+			// The app is connected but stalled (a prompt or a slow Apple Event): the key keeps its last face.
+			const busy = p.link === "online" && p.busy === true;
+			statusEl.textContent = missing ? LABELS.missing : busy ? LABELS.busy : LABELS[p.link] ?? LABELS.offline;
+			dot.className = "dot " + (missing ? "error" : busy ? "busy" : p.link);
+			if (p.version) versionEl.textContent = "Plugin " + p.version;
+		}
+
+		// Called by Stream Deck once the page has loaded.
+		window.connectElgatoStreamDeckSocket = (port, uuid, registerEvent, _info, actionInfo) => {
+			let action = "io.github.nordavid.acvoice.streamdeck.voice";
+			try {
+				action = JSON.parse(actionInfo).action ?? action;
+			} catch {}
+			const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+			socket.onopen = () => {
+				socket.send(JSON.stringify({ event: registerEvent, uuid }));
+				socket.send(JSON.stringify({ event: "sendToPlugin", action, context: uuid, payload: { type: "status?" } }));
+			};
+			socket.onmessage = (msg) => {
+				const data = JSON.parse(msg.data);
+				if (data.event === "sendToPropertyInspector" && data.payload?.type === "status") show(data.payload);
+			};
+		};
+	</script>
+</body>
+</html>

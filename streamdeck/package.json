@@ -1,0 +1,42 @@
+{
+	"name": "ac-voice-streamdeck",
+	"version": "0.1.0",
+	"description": "Stream Deck plugin for AC Voice: one key that starts voice input and mirrors the app state.",
+	"private": true,
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
+	"scripts": {
+		"build": "rollup -c",
+		"watch": "rollup -c -w --watch.onEnd=\"streamdeck restart io.github.nordavid.acvoice.streamdeck\"",
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"test": "vitest run --configLoader native",
+		"icons": "tsx scripts/build-icons.ts",
+		"fixtures": "sh scripts/gen-ipc-fixtures.sh",
+		"validate": "streamdeck validate --no-update-check io.github.nordavid.acvoice.streamdeck.sdPlugin",
+		"e2e": "node fake-host/host.mjs",
+		"check": "npm run typecheck && npm test && npm run build && npm run validate && npm run e2e",
+		"link": "streamdeck link io.github.nordavid.acvoice.streamdeck.sdPlugin",
+		"pack": "streamdeck pack io.github.nordavid.acvoice.streamdeck.sdPlugin"
+	},
+	"dependencies": {
+		"@elgato/streamdeck": "3.0.4",
+		"@elgato/utils": "0.6.2"
+	},
+	"devDependencies": {
+		"@elgato/cli": "1.10.4",
+		"@resvg/resvg-js": "2.6.2",
+		"@rollup/plugin-commonjs": "29.0.3",
+		"@rollup/plugin-node-resolve": "16.0.3",
+		"@rollup/plugin-typescript": "12.3.1",
+		"@types/node": "24.1.0",
+		"rollup": "4.68.2",
+		"tslib": "2.9.1",
+		"tsx": "4.23.15",
+		"typescript": "5.9.3",
+		"vitest": "5.1.0",
+		"ws": "8.22.2"
+	}
+}

@@ -1,0 +1,47 @@
+{
+	"$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+	"Name": "AC Voice",
+	"Version": "0.1.0.0",
+	"Author": "David Einenkel",
+	"Description": "Sprachsteuerung für ActiveCollab. Tippe auf die Taste und sprich. AC Voice öffnet Projekte, Tickets und deine Aufgaben in Chrome.",
+	"Category": "AC Voice",
+	"CategoryIcon": "imgs/plugin/category-icon",
+	"Icon": "imgs/plugin/marketplace",
+	"CodePath": "bin/plugin.js",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "26"
+		}
+	],
+	"Nodejs": {
+		"Version": "24",
+		"Debug": "disabled"
+	},
+	"UUID": "io.github.nordavid.acvoice.streamdeck",
+	"ApplicationsToMonitor": {
+		"mac": ["io.github.nordavid.acvoice"]
+	},
+	"Actions": [
+		{
+			"Name": "AC Voice",
+			"UUID": "io.github.nordavid.acvoice.streamdeck.voice",
+			"Icon": "imgs/actions/voice/icon",
+			"Tooltip": "Tippe und sprich. Oder halte die Taste beim Sprechen.",
+			"Controllers": ["Keypad"],
+			"UserTitleEnabled": false,
+			"SupportedInMultiActions": false,
+			"States": [
+				{
+					"Image": "imgs/actions/voice/key",
+					"ShowTitle": false
+				}
+			],
+			"PropertyInspectorPath": "ui/voice.html"
+		}
+	]
+}

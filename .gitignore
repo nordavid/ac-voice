@@ -1,0 +1,37 @@
+.build/
+.build-*/
+.swiftpm/
+dist/
+*.xcodeproj
+.DS_Store
+*.p12
+*.log
+
+# Private data: real project names, recordings, generated TTS audio, AC dumps
+Tests/Fixtures/private/
+Tests/Fixtures/tts/
+Tests/Fixtures/recordings/
+
+# Research spikes are reference material for porting, not part of the build. They contain real project names
+# and stay private like Tests/Fixtures/private; never add them with `git add -f`.
+spikes/
+
+# Stream Deck plugin build output
+streamdeck/node_modules/
+streamdeck/*.sdPlugin/bin/
+streamdeck/*.sdPlugin/logs/
+
+# Local settings and editor state
+.env
+/config.json
+DerivedData/
+xcuserdata/
+.claude/
+
+# Audio outside the ignored fixture folders (TTS clips, debug recordings)
+*.aiff
+*.wav
+*.caf
+
+# Stream Deck plugin test coverage
+streamdeck/coverage/

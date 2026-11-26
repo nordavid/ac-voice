@@ -1,0 +1,516 @@
+{
+  "commandDecode" : [
+    {
+      "expect" : {
+        "at" : 1732440000000,
+        "id" : "sd-7",
+        "t" : "press"
+      },
+      "line" : "{\"v\":1,\"t\":\"press\",\"id\":\"sd-7\",\"at\":1732440000000}"
+    },
+    {
+      "expect" : {
+        "heldMs" : 812,
+        "id" : "sd-8",
+        "pressId" : "sd-7",
+        "t" : "release"
+      },
+      "line" : "{\"v\":1,\"t\":\"release\",\"id\":\"sd-8\",\"pressId\":\"sd-7\",\"heldMs\":812}"
+    },
+    {
+      "expect" : {
+        "id" : "sd-9",
+        "index" : 2,
+        "seq" : 6,
+        "t" : "choose"
+      },
+      "line" : "{\"v\":1,\"t\":\"choose\",\"id\":\"sd-9\",\"index\":2,\"seq\":6}"
+    },
+    {
+      "expect" : {
+        "id" : "sd-10",
+        "t" : "cancel"
+      },
+      "line" : "{\"v\":1,\"t\":\"cancel\",\"id\":\"sd-10\"}"
+    },
+    {
+      "expect" : {
+        "id" : "sd-11",
+        "t" : "ping"
+      },
+      "line" : "{\"v\":1,\"t\":\"ping\",\"id\":\"sd-11\"}"
+    },
+    {
+      "expect" : {
+        "client" : "streamdeck",
+        "t" : "hello",
+        "version" : "0.1.0"
+      },
+      "line" : "{\"v\":1,\"t\":\"hello\",\"client\":\"streamdeck\",\"version\":\"0.1.0\"}"
+    },
+    {
+      "expect" : {
+        "client" : "?",
+        "t" : "hello",
+        "version" : "?"
+      },
+      "line" : "{\"v\":1,\"t\":\"hello\"}"
+    },
+    {
+      "expect" : {
+        "heldMs" : 812,
+        "id" : "sd-8",
+        "t" : "release"
+      },
+      "line" : "{\"v\":1,\"t\":\"release\",\"id\":\"sd-8\",\"heldMs\":812}"
+    },
+    {
+      "expect" : {
+        "id" : "sd-9",
+        "index" : 2,
+        "t" : "choose"
+      },
+      "line" : "{\"v\":1,\"t\":\"choose\",\"id\":\"sd-9\",\"index\":2}"
+    },
+    {
+      "expect" : {
+        "heldMs" : 813,
+        "id" : "a",
+        "t" : "release"
+      },
+      "line" : "{\"v\":1.0,\"t\":\"release\",\"id\":\"a\",\"heldMs\":812.6,\"extra\":{\"x\":1}}"
+    },
+    {
+      "expect" : {
+        "at" : 1732440000000,
+        "id" : "b",
+        "t" : "press"
+      },
+      "line" : "{\"v\":1,\"t\":\"press\",\"id\":\"b\",\"at\":1732440000000.0,\"client\":5}"
+    },
+    {
+      "expect" : {
+        "at" : 0,
+        "id" : "c",
+        "t" : "press"
+      },
+      "line" : "{\"v\":1,\"t\":\"press\",\"id\":\"c\"}"
+    },
+    {
+      "expect" : {
+        "heldMs" : 0,
+        "id" : "d",
+        "t" : "release"
+      },
+      "line" : "{\"v\":1,\"t\":\"release\",\"id\":\"d\",\"heldMs\":\"812\"}"
+    },
+    {
+      "expect" : {
+        "heldMs" : -3,
+        "id" : "e",
+        "t" : "release"
+      },
+      "line" : "{\"v\":1,\"t\":\"release\",\"id\":\"e\",\"heldMs\":-2.5}"
+    },
+    {
+      "expect" : {
+        "id" : "f",
+        "index" : 3,
+        "t" : "choose"
+      },
+      "line" : "{\"v\":1,\"t\":\"choose\",\"id\":\"f\",\"index\":2.5,\"seq\":\"6\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":2,\"t\":\"press\",\"id\":\"x\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"future\",\"id\":\"x\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"press\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"press\",\"id\":7}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"choose\",\"id\":\"x\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "not json"
+    },
+    {
+      "expect" : null,
+      "line" : "[1,2,3]"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"t\":\"press\",\"id\":\"x\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":\"1\",\"t\":\"press\",\"id\":\"x\"}"
+    }
+  ],
+  "commands" : [
+    {
+      "cmd" : {
+        "client" : "streamdeck",
+        "t" : "hello",
+        "version" : "0.1.0"
+      },
+      "line" : "{\"client\":\"streamdeck\",\"t\":\"hello\",\"v\":1,\"version\":\"0.1.0\"}"
+    },
+    {
+      "cmd" : {
+        "at" : 1732440000000,
+        "id" : "sd-7",
+        "t" : "press"
+      },
+      "line" : "{\"at\":1732440000000,\"id\":\"sd-7\",\"t\":\"press\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "heldMs" : 812,
+        "id" : "sd-8",
+        "pressId" : "sd-7",
+        "t" : "release"
+      },
+      "line" : "{\"heldMs\":812,\"id\":\"sd-8\",\"pressId\":\"sd-7\",\"t\":\"release\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "heldMs" : 0,
+        "id" : "r",
+        "t" : "release"
+      },
+      "line" : "{\"heldMs\":0,\"id\":\"r\",\"t\":\"release\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "id" : "sd-9",
+        "index" : 2,
+        "seq" : 6,
+        "t" : "choose"
+      },
+      "line" : "{\"id\":\"sd-9\",\"index\":2,\"seq\":6,\"t\":\"choose\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "id" : "c",
+        "index" : 1,
+        "t" : "choose"
+      },
+      "line" : "{\"id\":\"c\",\"index\":1,\"t\":\"choose\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "id" : "sd-10",
+        "t" : "cancel"
+      },
+      "line" : "{\"id\":\"sd-10\",\"t\":\"cancel\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "id" : "sd-11",
+        "t" : "ping"
+      },
+      "line" : "{\"id\":\"sd-11\",\"t\":\"ping\",\"v\":1}"
+    },
+    {
+      "cmd" : {
+        "at" : 5,
+        "id" : "sd-\"quoted\" / slash",
+        "t" : "press"
+      },
+      "line" : "{\"at\":5,\"id\":\"sd-\\\"quoted\\\" / slash\",\"t\":\"press\",\"v\":1}"
+    }
+  ],
+  "levels" : [
+    {
+      "line" : "{\"rms\":0,\"t\":\"level\",\"v\":1}",
+      "msg" : {
+        "rms" : 0,
+        "t" : "level",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"rms\":0.42,\"t\":\"level\",\"v\":1}",
+      "msg" : {
+        "rms" : 0.41999999999999998,
+        "t" : "level",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"rms\":0.5,\"t\":\"level\",\"v\":1}",
+      "msg" : {
+        "rms" : 0.5,
+        "t" : "level",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"rms\":1,\"t\":\"level\",\"v\":1}",
+      "msg" : {
+        "rms" : 1,
+        "t" : "level",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"rms\":0.123456789,\"t\":\"level\",\"v\":1}",
+      "msg" : {
+        "rms" : 0.123456789,
+        "t" : "level",
+        "v" : 1
+      }
+    }
+  ],
+  "maxLineBytes" : 65536,
+  "pongs" : [
+    {
+      "line" : "{\"id\":\"sd-11\",\"t\":\"pong\",\"v\":1}",
+      "msg" : {
+        "id" : "sd-11",
+        "t" : "pong",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"id\":\"x\",\"t\":\"pong\",\"v\":1}",
+      "msg" : {
+        "id" : "x",
+        "t" : "pong",
+        "v" : 1
+      }
+    }
+  ],
+  "source" : "Generated from Sources/ACVoiceCore/IPC.swift (IPC.line / IPC.decodeCommand / JSONDecoder for IPC.State). Do not edit by hand.",
+  "stateDecode" : [
+    {
+      "expect" : {
+        "choices" : [
+          {
+            "detail" : "WWT: Website Relaunch [AGIL]",
+            "label" : "Relaunch",
+            "n" : 1
+          }
+        ],
+        "deadline" : 1732440007234,
+        "phase" : "choices",
+        "seq" : 6,
+        "since" : 1732440001234,
+        "t" : "state",
+        "total" : 4,
+        "transcript" : "Öffne das WWT-Projekt",
+        "v" : 1
+      },
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":6,\"phase\":\"choices\",\"since\":1732440001234,\"transcript\":\"Öffne das WWT-Projekt\",\"preview\":null,\"choices\":[{\"n\":1,\"label\":\"Relaunch\",\"detail\":\"WWT: Website Relaunch [AGIL]\"}],\"total\":4,\"deadline\":1732440007234,\"message\":null,\"micReady\":null}"
+    },
+    {
+      "expect" : {
+        "choices" : [
+          {
+            "detail" : "WWT: Website Relaunch [AGIL]",
+            "label" : "Relaunch",
+            "n" : 1
+          }
+        ],
+        "deadline" : 1732440006234,
+        "phase" : "choices",
+        "seq" : 6,
+        "since" : 1732440001234,
+        "t" : "state",
+        "transcript" : "Öffne das WWT-Projekt",
+        "v" : 1
+      },
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":6,\"phase\":\"choices\",\"since\":1732440001234,\"transcript\":\"Öffne das WWT-Projekt\",\"deadline\":1732440006234,\"choices\":[{\"n\":1,\"label\":\"Relaunch\",\"detail\":\"WWT: Website Relaunch [AGIL]\"}]}"
+    },
+    {
+      "expect" : {
+        "micReady" : true,
+        "phase" : "listening",
+        "seq" : 2,
+        "since" : 5,
+        "t" : "state",
+        "v" : 1
+      },
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":2,\"phase\":\"listening\",\"since\":5,\"micReady\":true,\"future\":{\"x\":[1,2]}}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":2,\"phase\":\"thinking\",\"since\":5}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":2,\"phase\":\"idle\"}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"state\",\"phase\":\"idle\",\"since\":5}"
+    },
+    {
+      "expect" : null,
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":\"2\",\"phase\":\"idle\",\"since\":5}"
+    }
+  ],
+  "states" : [
+    {
+      "line" : "{\"choices\":[{\"detail\":\"WWT: Website Relaunch [AGIL]\",\"label\":\"Relaunch\",\"n\":1}],\"deadline\":1732440007234,\"phase\":\"choices\",\"seq\":6,\"since\":1732440001234,\"t\":\"state\",\"total\":4,\"transcript\":\"Öffne das WWT-Projekt\",\"v\":1}",
+      "state" : {
+        "choices" : [
+          {
+            "detail" : "WWT: Website Relaunch [AGIL]",
+            "label" : "Relaunch",
+            "n" : 1
+          }
+        ],
+        "deadline" : 1732440007234,
+        "phase" : "choices",
+        "seq" : 6,
+        "since" : 1732440001234,
+        "t" : "state",
+        "total" : 4,
+        "transcript" : "Öffne das WWT-Projekt",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"phase\":\"idle\",\"seq\":1,\"since\":1732440000000,\"t\":\"state\",\"v\":1}",
+      "state" : {
+        "phase" : "idle",
+        "seq" : 1,
+        "since" : 1732440000000,
+        "t" : "state",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"message\":\"Sprachmodell lädt\",\"micReady\":false,\"phase\":\"listening\",\"seq\":2,\"since\":1732440000010,\"t\":\"state\",\"v\":1}",
+      "state" : {
+        "message" : "Sprachmodell lädt",
+        "micReady" : false,
+        "phase" : "listening",
+        "seq" : 2,
+        "since" : 1732440000010,
+        "t" : "state",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"micReady\":true,\"phase\":\"listening\",\"preview\":\"Ticket 412\",\"seq\":3,\"since\":1732440000010,\"t\":\"state\",\"transcript\":\"Öffne WWT Ticket 412\",\"v\":1}",
+      "state" : {
+        "micReady" : true,
+        "phase" : "listening",
+        "preview" : "Ticket 412",
+        "seq" : 3,
+        "since" : 1732440000010,
+        "t" : "state",
+        "transcript" : "Öffne WWT Ticket 412",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"message\":\"Suche Ticket 412 …\",\"phase\":\"processing\",\"preview\":\"Ticket 412\",\"seq\":4,\"since\":1732440000900,\"t\":\"state\",\"transcript\":\"Öffne WWT Ticket 412\",\"v\":1}",
+      "state" : {
+        "message" : "Suche Ticket 412 …",
+        "phase" : "processing",
+        "preview" : "Ticket 412",
+        "seq" : 4,
+        "since" : 1732440000900,
+        "t" : "state",
+        "transcript" : "Öffne WWT Ticket 412",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"choices\":[{\"detail\":\"WWT: Website Relaunch [AGIL]\",\"label\":\"Relaunch\",\"n\":1},{\"detail\":\"WWT: TYPO3 Website maintenance [AGIL]\",\"label\":\"TYPO3 Maint.\",\"n\":2},{\"detail\":\"WWT: Maintenance [SLA]\",\"label\":\"Maintenance\",\"n\":3},{\"detail\":\"WWT: Grand Navigation [AGIL]\",\"label\":\"Grand Navig.\",\"n\":4},{\"label\":\"Größe\",\"n\":5},{\"detail\":\"S+K: Partner [INT]\",\"label\":\"S+K Partner\",\"n\":6}],\"deadline\":1732440007000,\"message\":\"Sag eine Zahl\",\"phase\":\"choices\",\"preview\":\"WWT: 4 Projekte\",\"seq\":5,\"since\":1732440001000,\"t\":\"state\",\"total\":9,\"transcript\":\"Öffne das WWT-Projekt\",\"v\":1}",
+      "state" : {
+        "choices" : [
+          {
+            "detail" : "WWT: Website Relaunch [AGIL]",
+            "label" : "Relaunch",
+            "n" : 1
+          },
+          {
+            "detail" : "WWT: TYPO3 Website maintenance [AGIL]",
+            "label" : "TYPO3 Maint.",
+            "n" : 2
+          },
+          {
+            "detail" : "WWT: Maintenance [SLA]",
+            "label" : "Maintenance",
+            "n" : 3
+          },
+          {
+            "detail" : "WWT: Grand Navigation [AGIL]",
+            "label" : "Grand Navig.",
+            "n" : 4
+          },
+          {
+            "label" : "Größe",
+            "n" : 5
+          },
+          {
+            "detail" : "S+K: Partner [INT]",
+            "label" : "S+K Partner",
+            "n" : 6
+          }
+        ],
+        "deadline" : 1732440007000,
+        "message" : "Sag eine Zahl",
+        "phase" : "choices",
+        "preview" : "WWT: 4 Projekte",
+        "seq" : 5,
+        "since" : 1732440001000,
+        "t" : "state",
+        "total" : 9,
+        "transcript" : "Öffne das WWT-Projekt",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"message\":\"WWT: Website Relaunch\",\"phase\":\"success\",\"preview\":\"WWT: Website Relaunch\",\"seq\":7,\"since\":1732440002000,\"t\":\"state\",\"transcript\":\"WWT Relaunch\",\"v\":1}",
+      "state" : {
+        "message" : "WWT: Website Relaunch",
+        "phase" : "success",
+        "preview" : "WWT: Website Relaunch",
+        "seq" : 7,
+        "since" : 1732440002000,
+        "t" : "state",
+        "transcript" : "WWT Relaunch",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"message\":\"Nichts gehört\",\"phase\":\"error\",\"seq\":8,\"since\":1732440003000,\"t\":\"state\",\"v\":1}",
+      "state" : {
+        "message" : "Nichts gehört",
+        "phase" : "error",
+        "seq" : 8,
+        "since" : 1732440003000,
+        "t" : "state",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"micReady\":true,\"phase\":\"listening\",\"seq\":9,\"since\":1,\"t\":\"state\",\"transcript\":\"Quote \\\" back\\\\slash / tab\\tnew\\nline <b>&amp; 🎙 é\",\"v\":1}",
+      "state" : {
+        "micReady" : true,
+        "phase" : "listening",
+        "seq" : 9,
+        "since" : 1,
+        "t" : "state",
+        "transcript" : "Quote \" back\\slash / tab\tnew\nline <b>&amp; 🎙 é",
+        "v" : 1
+      }
+    }
+  ]
+}

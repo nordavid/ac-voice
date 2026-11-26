@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for "AC Voice.app" (applied by scripts/bundle.sh).
+  - device.audio-input: microphone access for the voice command (TCC still asks once).
+  - automation.apple-events: Apple Events to Google Chrome to reuse the AC tab (TCC still asks once).
+  The app is not sandboxed and needs nothing else. Speech recognition needs no entitlement.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>
