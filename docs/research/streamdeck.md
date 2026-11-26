@@ -315,4 +315,4 @@ End-to-end harness:
 **Compliance**
 - Nothing was installed into the Stream Deck plugins folder.
 - No AC API calls were made. Chrome was not touched and no apps were opened.
-- `ac-mcp` and the reference plugin are unchanged in content.
+- Other local repositories and the reference plugin are unchanged in content.

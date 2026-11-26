@@ -43,10 +43,12 @@ export interface StateMsg {
 	total?: number;
 	/** Epoch ms, end of the choices window. */
 	deadline?: number;
-	/** German status for success / error / hints. */
+	/** Status for success / error / hints, in the app language. */
 	message?: string;
 	/** listening only: false while the engine starts, true once the mic is hot. */
 	micReady?: boolean;
+	/** App language ("de", "en"). Older apps omit it; the plugin then follows the Stream Deck language. */
+	lang?: string;
 }
 
 /** App -> plugin: smoothed mic level 0..1 while listening (`IPC.Level`). Not part of the snapshot. */
@@ -197,6 +199,8 @@ function parseState(o: Obj): StateMsg | undefined {
 	const message = str(o.message);
 	if (message !== undefined) s.message = message;
 	if (typeof o.micReady === "boolean") s.micReady = o.micReady;
+	const lang = str(o.lang);
+	if (lang !== undefined) s.lang = lang;
 	return s;
 }
 

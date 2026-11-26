@@ -19,7 +19,7 @@ public final class OnboardingModel {
     }
 
     public enum ActionKind: String, Sendable, Equatable {
-        case importToken, requestMicrophone, openMicrophoneSettings, requestAutomation, openAutomationSettings
+        case requestMicrophone, openMicrophoneSettings, requestAutomation, openAutomationSettings
         case runSelfTest, requestSpeechRecognition, copyStreamDeckCommands, openLoginItems
     }
 
@@ -37,10 +37,20 @@ public final class OnboardingModel {
         public var action: StepAction?
     }
 
-    /// The paste field. Cleared right after a save.
+    /// "AC-Adresse". Starts with the configured address, empty while that is the placeholder.
+    public var address = ""
+    /// "E-Mail". Kept after an attempt.
+    public var email = ""
+    /// "Passwort". Cleared by every sign-in attempt, successful or not, by a token save, when the form hides and when
+    /// the window closes; never stored anywhere else.
+    public var password = ""
+    /// The paste field ("Mit Token anmelden"). Cleared once the token goes to the Keychain, when the form hides and
+    /// when the window closes.
     public var pastedToken = ""
-    /// A token is stored, but the user wants to paste another one ("Anderen Token einfügen").
-    public var replacingToken = false
+    /// "Mit Token anmelden" is expanded (collapsed by default).
+    public var showsTokenSignIn = false
+    /// A token is stored, but the user wants to sign in again ("Neu anmelden").
+    public var signingInAgain = false
     public private(set) var steps: [Step] = []
     public private(set) var launchAtLogin = false
     /// Chrome's Automation status; nil while Chrome is not running or before the first check.
@@ -58,19 +68,41 @@ public final class OnboardingModel {
         self.controller = controller
         self.copy = copy
         self.sourceRoot = sourceRoot
+        address = Self.addressText(controller.config)
         rebuild()
     }
 
-    /// The paste field shows while no usable token is stored, or on request.
-    public var showsTokenField: Bool { controller.status.token != .present || replacingToken }
+    /// The address field's text for a config: empty while the address is the placeholder.
+    static func addressText(_ config: Config) -> String {
+        config.hasPlaceholderBaseURL ? "" : config.acBaseURL.absoluteString
+    }
 
-    /// Above "Fertig": how to try the app.
+    /// The sign-in fields show while no usable token is stored, or on request.
+    public var showsSignIn: Bool { controller.status.token != .present || signingInAgain }
+
+    /// "Anmelden" is enabled: address, e-mail and password are filled and no request runs.
+    public var canLogin: Bool {
+        !working.contains(.token) && Self.filled(address) && Self.filled(email) && !password.isEmpty
+    }
+
+    /// "Speichern" of "Mit Token anmelden" is enabled: address and token are filled and no request runs (the same
+    /// rules as "Anmelden").
+    public var canSaveToken: Bool {
+        !working.contains(.token) && Self.filled(address) && Self.filled(pastedToken)
+    }
+
+    private static func filled(_ text: String) -> Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// Left of "Fertig": how to try the app.
     public var tryItText: String {
         let hk = controller.config.hotkey
-        return AppText.tryIt(hotkey: hk.enabled && controller.status.hotkeyError == nil ? hk.display : nil)
+        return text.tryIt(hotkey: hk.enabled && controller.status.hotkeyError == nil ? text.hotkey(hk) : nil)
     }
 
     private var services: Services { controller.services }
+
+    /// The window's texts in the app language (`Controller.language`).
+    public var text: AppText { AppText(controller.language) }
 
     /// Token, microphone or a Chrome Automation that was never asked for.
     public var needsAttention: Bool {
@@ -98,15 +130,15 @@ public final class OnboardingModel {
     public func rebuild() {
         chromeRunning = services.permissions.isChromeRunning
         if !chromeRunning { automation = nil }
-        if controller.status.token != .present { replacingToken = false }
+        if controller.status.token != .present { signingInAgain = false }
+        // The form hid (a token arrived): nothing typed into it stays in memory.
+        if !showsSignIn { clearSecrets() }
         steps = StepID.allCases.map(step)
         launchAtLogin = controller.loginStatus.isOn
     }
 
     public func perform(_ kind: ActionKind) async {
         switch kind {
-        case .importToken:
-            await busy(.token) { _ = await self.controller.importToken() }
         case .requestMicrophone:
             await busy(.microphone) { _ = await self.services.permissions.requestMicrophone() }
         case .openMicrophoneSettings:
@@ -132,13 +164,75 @@ public final class OnboardingModel {
         rebuild()
     }
 
+    /// "Anmelden" (or Return in the password field): saves a changed address first, then signs in. The password field
+    /// is cleared right away; the password lives on only for this call. Only a successful sign-in closes the form, so
+    /// after a failure the user corrects the input and tries again.
+    public func login() async {
+        guard canLogin else { return }
+        let secret = password
+        password = ""
+        let user = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        var signedIn = false
+        await busy(.token) {
+            guard await self.applyAddress() else { return }
+            signedIn = await self.controller.login(username: user, password: secret)
+        }
+        if signedIn { signingInAgain = false }
+        rebuild()
+    }
+
+    /// "Mit Token anmelden" > "Speichern" (or Return in the paste field): saves a changed address first, then the
+    /// pasted token for that address. The paste stays while the address is missing or invalid, so the user fixes the
+    /// address and saves again. Only a successful save closes the form.
     public func savePastedToken() async {
         let token = pastedToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        pastedToken = ""
-        guard !token.isEmpty else { return }
-        await busy(.token) { _ = await self.controller.saveToken(token) }
-        if controller.status.token == .present { replacingToken = false }
+        guard !token.isEmpty, !working.contains(.token) else { return }
+        // The password form is left without an attempt.
+        password = ""
+        var saved = false
+        await busy(.token) {
+            guard await self.applyAddress() else { return }
+            // The token goes to the Keychain now: the field empties whatever the Keychain answers.
+            self.pastedToken = ""
+            saved = await self.controller.saveToken(token)
+        }
+        if saved { signingInAgain = false }
         rebuild()
+    }
+
+    /// "Neu anmelden oder Adresse ändern": opens the form while a token is stored. The message of an earlier attempt
+    /// goes away.
+    public func beginSignInAgain() {
+        signingInAgain = true
+        address = Self.addressText(controller.config)
+        controller.dismissTokenMessage()
+        rebuild()
+    }
+
+    /// The window closed ("Fertig" or the close button). The password and a pasted token never outlive the window, the
+    /// address field shows the address the app uses again, an open re-sign-in ends and the message of an abandoned
+    /// attempt goes away. The e-mail address stays for the next sign-in.
+    public func windowClosed() {
+        clearSecrets()
+        signingInAgain = false
+        address = Self.addressText(controller.config)
+        controller.dismissTokenMessage()
+        rebuild()
+    }
+
+    private func clearSecrets() {
+        if !password.isEmpty { password = "" }
+        if !pastedToken.isEmpty { pastedToken = "" }
+    }
+
+    /// Saves the address field when it differs from the configured address. An empty field keeps the configured
+    /// address unless that is the placeholder. false: the address is missing or invalid (the row says why).
+    private func applyAddress() async -> Bool {
+        let typed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty, !controller.config.hasPlaceholderBaseURL { return true }
+        guard await controller.setACBaseURL(typed) else { return false }
+        address = Self.addressText(controller.config)
+        return true
     }
 
     public func setLaunchAtLogin(_ enabled: Bool) {
@@ -166,96 +260,106 @@ public final class OnboardingModel {
         }
     }
 
+    /// The sign-in fields and "Anmelden" live inside the row (`OnboardingRow`), so the row has no action button.
+    /// The message of an attempt shows only next to the form it belongs to: once a stored token closes the form, the
+    /// row says where the app is signed in.
     private func tokenStep() -> Step {
-        let action = StepAction(kind: .importToken, title: AppText.tokenImport, enabled: !working.contains(.token))
         if working.contains(.token) {
-            return Step(id: .token, title: AppText.tokenTitle, status: AppText.checking, tone: .working, action: action)
+            return Step(id: .token, title: text.tokenTitle, status: text.signingIn, tone: .working, action: nil)
         }
         let s = controller.status
-        let (text, tone): (String, Tone) = switch s.token {
-        case .present: (AppText.tokenStored, .done)
-        case .invalid: (AppText.tokenRejected, .todo)
-        case .needsUserId: (AppText.tokenUserId, .todo)
-        case .unreadable: (AppText.tokenUnreadable, .todo)
-        case .missing, .unknown: (AppText.tokenNone, .todo)
+        let (status, tone): (String, Tone) = switch s.token {
+        case .present: (text.tokenStored(host: Self.hostText(controller.config.acBaseURL)), .done)
+        case .invalid: (text.tokenRejected, .todo)
+        case .needsUserId: (text.tokenUserId, .todo)
+        case .unreadable: (text.tokenUnreadable, .todo)
+        case .missing, .unknown: (text.tokenNone, .todo)
         }
-        return Step(id: .token, title: AppText.tokenTitle, status: s.tokenMessage ?? text,
-                    tone: s.tokenMessage == nil ? tone : .todo, action: action)
+        let message = showsSignIn ? s.tokenMessage : nil
+        return Step(id: .token, title: text.tokenTitle, status: message ?? status,
+                    tone: message == nil ? tone : .todo, action: nil)
+    }
+
+    /// The host of an AC address as the row names it, with the port when it is not 443.
+    static func hostText(_ base: URL) -> String {
+        let host = base.host ?? base.absoluteString
+        guard let port = base.port, port != 443 else { return host }
+        return "\(host):\(port)"
     }
 
     private func micStep() -> Step {
         if working.contains(.microphone) {
-            return Step(id: .microphone, title: AppText.micTitle, status: AppText.checking, tone: .working,
-                        action: StepAction(kind: .requestMicrophone, title: AppText.micRequest, enabled: false))
+            return Step(id: .microphone, title: text.micTitle, status: text.checking, tone: .working,
+                        action: StepAction(kind: .requestMicrophone, title: text.micRequest, enabled: false))
         }
         switch services.permissions.microphone {
         case .granted:
-            return Step(id: .microphone, title: AppText.micTitle, status: AppText.micGranted, tone: .done, action: nil)
+            return Step(id: .microphone, title: text.micTitle, status: text.micGranted, tone: .done, action: nil)
         case .notDetermined:
-            return Step(id: .microphone, title: AppText.micTitle, status: AppText.micNotDetermined, tone: .todo,
-                        action: StepAction(kind: .requestMicrophone, title: AppText.micRequest, enabled: true))
+            return Step(id: .microphone, title: text.micTitle, status: text.micNotDetermined, tone: .todo,
+                        action: StepAction(kind: .requestMicrophone, title: text.micRequest, enabled: true))
         case .denied, .restricted:
-            return Step(id: .microphone, title: AppText.micTitle, status: AppText.micDenied, tone: .todo,
-                        action: StepAction(kind: .openMicrophoneSettings, title: AppText.openSettings, enabled: true))
+            return Step(id: .microphone, title: text.micTitle, status: text.micDenied, tone: .todo,
+                        action: StepAction(kind: .openMicrophoneSettings, title: text.openSettings, enabled: true))
         }
     }
 
     private func chromeStep() -> Step {
-        let request = StepAction(kind: .requestAutomation, title: AppText.chromeRequest, enabled: chromeRunning && !working.contains(.chrome))
+        let request = StepAction(kind: .requestAutomation, title: text.chromeRequest, enabled: chromeRunning && !working.contains(.chrome))
         if working.contains(.chrome) {
-            return Step(id: .chrome, title: AppText.chromeTitle, status: AppText.checking, tone: .working, action: request)
+            return Step(id: .chrome, title: text.chromeTitle, status: text.checking, tone: .working, action: request)
         }
         guard chromeRunning else {
-            return Step(id: .chrome, title: AppText.chromeTitle, status: AppText.chromeNotRunning, tone: .info, action: request)
+            return Step(id: .chrome, title: text.chromeTitle, status: text.chromeNotRunning, tone: .info, action: request)
         }
         switch automation {
         case .granted?:
-            return Step(id: .chrome, title: AppText.chromeTitle, status: AppText.chromeGranted, tone: .done, action: nil)
+            return Step(id: .chrome, title: text.chromeTitle, status: text.chromeGranted, tone: .done, action: nil)
         case .notDetermined?:
-            return Step(id: .chrome, title: AppText.chromeTitle, status: AppText.chromeNotDetermined, tone: .todo, action: request)
+            return Step(id: .chrome, title: text.chromeTitle, status: text.chromeNotDetermined, tone: .todo, action: request)
         case .denied?:
-            return Step(id: .chrome, title: AppText.chromeTitle, status: AppText.chromeDenied, tone: .info,
-                        action: StepAction(kind: .openAutomationSettings, title: AppText.openSettings, enabled: true))
+            return Step(id: .chrome, title: text.chromeTitle, status: text.chromeDenied, tone: .info,
+                        action: StepAction(kind: .openAutomationSettings, title: text.openSettings, enabled: true))
         default:
-            return Step(id: .chrome, title: AppText.chromeTitle, status: AppText.chromeUnknown, tone: .info, action: request)
+            return Step(id: .chrome, title: text.chromeTitle, status: text.chromeUnknown, tone: .info, action: request)
         }
     }
 
     private func speechStep() -> Step {
         let s = controller.status
-        let run = StepAction(kind: .runSelfTest, title: AppText.speechRun,
+        let run = StepAction(kind: .runSelfTest, title: text.speechRun,
                              enabled: !s.selfCheckRunning && !working.contains(.speech) && s.speech != .warming)
         if s.selfCheckRunning || working.contains(.speech) {
-            return Step(id: .speech, title: AppText.speechTitle, status: AppText.selfTestRunning, tone: .working, action: run)
+            return Step(id: .speech, title: text.speechTitle, status: text.selfTestRunning, tone: .working, action: run)
         }
         if let c = s.selfCheck {
             if c.passed {
-                return Step(id: .speech, title: AppText.speechTitle, status: AppText.selfTestPassed(ms: c.elapsedMs),
+                return Step(id: .speech, title: text.speechTitle, status: text.selfTestPassed(ms: c.elapsedMs),
                             tone: .done, action: run)
             }
             // REVIEW m7: only when the self-test fails, ask for speech recognition.
             let ask = services.permissions.speechRecognition == .notDetermined
-            return Step(id: .speech, title: AppText.speechTitle, status: c.message, tone: .todo,
-                        action: ask ? StepAction(kind: .requestSpeechRecognition, title: AppText.speechRecognitionRequest,
+            return Step(id: .speech, title: text.speechTitle, status: text.localized(c.message), tone: .todo,
+                        action: ask ? StepAction(kind: .requestSpeechRecognition, title: text.speechRecognitionRequest,
                                                  enabled: true) : run)
         }
         switch s.speech {
         case .warming:
-            return Step(id: .speech, title: AppText.speechTitle, status: AppText.speechWarming, tone: .working, action: run)
+            return Step(id: .speech, title: text.speechTitle, status: text.speechWarming, tone: .working, action: run)
         case .unavailable:
-            return Step(id: .speech, title: AppText.speechTitle, status: AppText.speechUnavailable, tone: .todo, action: run)
+            return Step(id: .speech, title: text.speechTitle, status: text.speechUnavailable, tone: .todo, action: run)
         case .ready:
-            return Step(id: .speech, title: AppText.speechTitle, status: AppText.speechReady, tone: .done, action: run)
+            return Step(id: .speech, title: text.speechTitle, status: text.speechReady, tone: .done, action: run)
         }
     }
 
     private func streamDeckStep() -> Step {
         if !services.ipc.connectedClients.isEmpty {
-            return Step(id: .streamDeck, title: AppText.streamDeckTitle, status: AppText.streamDeckConnected, tone: .done, action: nil)
+            return Step(id: .streamDeck, title: text.streamDeckTitle, status: text.streamDeckConnected, tone: .done, action: nil)
         }
-        return Step(id: .streamDeck, title: AppText.streamDeckTitle,
-                    status: AppText.streamDeckMissing(folder: AppText.streamDeckFolder(sourceRoot: sourceRoot)), tone: .info,
-                    action: StepAction(kind: .copyStreamDeckCommands, title: AppText.streamDeckCopy, enabled: true))
+        return Step(id: .streamDeck, title: text.streamDeckTitle,
+                    status: text.streamDeckMissing(folder: AppText.streamDeckFolder(sourceRoot: sourceRoot)), tone: .info,
+                    action: StepAction(kind: .copyStreamDeckCommands, title: text.streamDeckCopy, enabled: true))
     }
 
     /// The switch shows the state; the row adds text only when something is to do (review U24).
@@ -263,15 +367,16 @@ public final class OnboardingModel {
         let status = controller.loginStatus
         switch status {
         case .enabled:
-            return Step(id: .autostart, title: AppText.autostartTitle, status: "", tone: .done, action: nil)
+            return Step(id: .autostart, title: text.autostartTitle, status: "", tone: .done, action: nil)
         case .disabled:
-            return Step(id: .autostart, title: AppText.autostartTitle, status: "", tone: .info, action: nil)
+            return Step(id: .autostart, title: text.autostartTitle, status: "", tone: .info, action: nil)
         case .requiresApproval:
-            return Step(id: .autostart, title: AppText.autostartTitle, status: status.hint ?? AppText.autostartOff,
-                        tone: .todo, action: StepAction(kind: .openLoginItems, title: AppText.openSettings, enabled: true))
+            return Step(id: .autostart, title: text.autostartTitle,
+                        status: status.hint(controller.language) ?? text.autostartOff, tone: .todo,
+                        action: StepAction(kind: .openLoginItems, title: text.openSettings, enabled: true))
         case .notFound:
-            return Step(id: .autostart, title: AppText.autostartTitle, status: status.hint ?? AppText.autostartOff,
-                        tone: .info, action: nil)
+            return Step(id: .autostart, title: text.autostartTitle,
+                        status: status.hint(controller.language) ?? text.autostartOff, tone: .info, action: nil)
         }
     }
 }
@@ -283,7 +388,7 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(AppText.onboardingIntro)
+            Text(model.text.onboardingIntro)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -297,7 +402,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
-                Button(AppText.done, action: onDone).keyboardShortcut(.defaultAction)
+                Button(model.text.done, action: onDone).keyboardShortcut(.defaultAction)
             }
         }
         .padding(22)
@@ -321,15 +426,15 @@ struct OnboardingRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if step.id == .token {
-                    if model.showsTokenField {
-                        tokenField
+                    if model.showsSignIn {
+                        signInForm
                     } else {
-                        Button(AppText.tokenReplace) { model.replacingToken = true }
+                        Button(model.text.signInAgain) { model.beginSignInAgain() }
                             .buttonStyle(.link)
                     }
                 }
                 if step.id == .autostart {
-                    Toggle(AppText.launchAtLogin, isOn: Binding(get: { model.launchAtLogin },
+                    Toggle(model.text.launchAtLoginSwitch, isOn: Binding(get: { model.launchAtLogin },
                                                                 set: { model.setLaunchAtLogin($0) }))
                         .toggleStyle(.switch)
                 }
@@ -343,16 +448,59 @@ struct OnboardingRow: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// AC-Adresse, E-Mail, Passwort and "Anmelden"; below, collapsed, the token paste field for single sign-on.
+    private var signInForm: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
+                GridRow {
+                    Text(model.text.addressLabel).gridColumnAlignment(.trailing)
+                    TextField(model.text.addressLabel, text: $model.address, prompt: Text(model.text.addressPlaceholder))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                }
+                GridRow {
+                    Text(model.text.emailLabel)
+                    TextField(model.text.emailLabel, text: $model.email, prompt: Text(model.text.emailPlaceholder))
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .textContentType(.username)
+                        .autocorrectionDisabled()
+                }
+                GridRow {
+                    Text(model.text.passwordLabel)
+                    SecureField(model.text.passwordLabel, text: $model.password)
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .textContentType(.password)
+                        .onSubmit { Task { await model.login() } }
+                }
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Button(model.text.signIn) { Task { await model.login() } }
+                    .disabled(!model.canLogin)
+                Text(model.text.signInHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            DisclosureGroup(model.text.tokenSignIn, isExpanded: $model.showsTokenSignIn) {
+                tokenField.padding(.top, 4)
+            }
+            .font(.callout)
+        }
+    }
+
     private var tokenField: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                SecureField(AppText.tokenPastePlaceholder, text: $model.pastedToken)
+                SecureField(model.text.tokenPastePlaceholder, text: $model.pastedToken)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { Task { await model.savePastedToken() } }
-                Button(AppText.tokenSave) { Task { await model.savePastedToken() } }
-                    .disabled(model.pastedToken.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button(model.text.tokenSave) { Task { await model.savePastedToken() } }
+                    .disabled(!model.canSaveToken)
             }
-            Text(AppText.tokenImportHint)
+            Text(model.text.tokenSignInHint)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -388,7 +536,7 @@ public final class OnboardingWindowController {
         if window == nil {
             let host = NSHostingController(rootView: OnboardingView(model: model, onDone: { [weak self] in self?.close() }))
             let w = NSWindow(contentViewController: host)
-            w.title = AppText.onboardingTitle
+            w.title = model.text.onboardingTitle
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             w.center()
@@ -417,8 +565,13 @@ public final class OnboardingWindowController {
         observers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshIfVisible() }
         })
+        // "Fertig" closes the window too. The model forgets what the form held (password, pasted token, an unsaved
+        // address) even though the window object and the model live on.
         observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stopObserving() }
+            MainActor.assumeIsolated {
+                self?.model.windowClosed()
+                self?.stopObserving()
+            }
         })
     }
 

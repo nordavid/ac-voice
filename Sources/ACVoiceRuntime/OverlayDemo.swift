@@ -27,6 +27,8 @@ public final class OverlayDemo {
     private let overlay: any OverlayPresenting
     private let clock: any RuntimeClock
     private let scripted: Bool
+    /// Language of the scripted command, the flow's texts and the gallery.
+    public let language: AppLanguage
     private var loop = false
     private var seq = 0
     private var stepTimer: (any TimerToken)?
@@ -36,13 +38,14 @@ public final class OverlayDemo {
     private var listening = false
     private var run: ScriptRun?
 
-    /// `scripted`: run the scripted command before the gallery.
-    public init(overlay: any OverlayPresenting, clock: any RuntimeClock,
-                scenarios: [OverlayScenario] = OverlayGallery.scenarios(), scripted: Bool = true) {
+    /// `scripted`: run the scripted command before the gallery. `scenarios`: nil for the gallery in `language`.
+    public init(overlay: any OverlayPresenting, clock: any RuntimeClock, scenarios: [OverlayScenario]? = nil,
+                scripted: Bool = true, language: AppLanguage = .de) {
         self.overlay = overlay
         self.clock = clock
-        self.scenarios = scenarios
+        self.scenarios = scenarios ?? OverlayGallery.scenarios(language: language)
         self.scripted = scripted
+        self.language = language
     }
 
     /// Starts with the scripted command (if any), then the gallery. `loop`: start over after the last state (launch
@@ -69,21 +72,24 @@ public final class OverlayDemo {
     // MARK: Scripted command
 
     /// The scripted command: (seconds from the press, event). Speech events carry the stamp the flow armed.
-    static let script: [(at: Double, event: ScriptEvent)] = [
-        (0.00, .press),
-        (0.15, .micReady),
-        (0.70, .speechStarted),
-        (0.90, .partial("Öffne")),
-        (1.20, .partial("Öffne das")),
-        (1.55, .partial("Öffne das WWT")),
-        (1.90, .partial("Öffne das WWT-Projekt")),
-        (2.60, .final("Öffne das WWT-Projekt")),
-        (4.30, .speechStarted),
-        (4.50, .partial("Die")),
-        (4.80, .partial("Die zweite")),
-        (5.30, .final("Die zweite")),
-        (5.36, .opened),
-    ]
+    static let script: [(at: Double, event: ScriptEvent)] = script(.de)
+
+    /// The scripted command in `language`: a WWT command that shows the list, then the answer "number two".
+    static func script(_ language: AppLanguage) -> [(at: Double, event: ScriptEvent)] {
+        let command = language == .de
+            ? ["Öffne", "Öffne das", "Öffne das WWT", "Öffne das WWT-Projekt"]
+            : ["Open", "Open WWT"]
+        let answer = language == .de ? ["Die", "Die zweite"] : ["Number", "Number two"]
+        let partialTimes = [0.90, 1.20, 1.55, 1.90]
+        return [(0.00, .press), (0.15, .micReady), (0.70, .speechStarted)]
+            + zip(partialTimes, command).map { ($0, ScriptEvent.partial($1)) }
+            + [(2.60, .final(command.last!)),
+               (4.30, .speechStarted),
+               (4.50, .partial(answer[0])),
+               (4.80, .partial(answer[1])),
+               (5.30, .final(answer[1])),
+               (5.36, .opened)]
+    }
 
     enum ScriptEvent: Equatable {
         case press, micReady, speechStarted, partial(String), final(String), opened
@@ -100,14 +106,16 @@ public final class OverlayDemo {
         position = -1
         var config = Config()
         config.earcons = false
-        let env = FlowEnv(interpreter: Interpreter(projects: Self.projects, config: config, history: History()),
-                          config: config)
+        let env = FlowEnv(interpreter: Interpreter(projects: Self.projects, config: config, history: History(),
+                                                   language: language),
+                          config: config, language: language)
         let r = ScriptRun(flow: VoiceFlow(timings: FlowTimings(), speechWarm: true), env: env)
         run = r
-        for (at, event) in Self.script where at > 0 {
+        let script = Self.script(language)
+        for (at, event) in script where at > 0 {
             r.steps.append(clock.after(at) { [weak self] in self?.play(event) })
         }
-        for (at, event) in Self.script where at <= 0 { play(event) }   // the press shows the card at once
+        for (at, event) in script where at <= 0 { play(event) }   // the press shows the card at once
     }
 
     private func play(_ e: ScriptEvent) {

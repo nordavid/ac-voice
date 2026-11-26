@@ -35,7 +35,7 @@ import Testing
         await rig.advance(FlowTimings().coldFinalize - 0.1)
         #expect(rig.phase == .processing)
         await rig.advance(0.2)
-        #expect(rig.phase == .error && rig.model.message == FlowText.modelStillLoading)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.modelStillLoading)
     }
 
     /// A warm end is not forwarded: the final follows within ~50 ms, and a resume or a discard would only flash
@@ -65,7 +65,7 @@ import Testing
         #expect(rig.phase == .listening && rig.model.transcript.isEmpty)
         // Review C1: the cough counts no more, the no-speech timeout runs again.
         await rig.advance(FlowTimings().noSpeech + 0.1)
-        #expect(rig.phase == .error && rig.model.message == FlowText.nothingHeard)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.nothingHeard)
     }
 
     /// Review U27: the overlay says "Die Einrichtung ist offen": a microphone refusal from the speech layer opens it.
@@ -75,7 +75,7 @@ import Testing
         await rig.listen()
         let before = rig.setupRequests
         await rig.emit(.failed(.micDenied))
-        #expect(rig.phase == .error && rig.model.hint == FlowText.setupIsOpen && rig.setupRequests == before + 1)
+        #expect(rig.phase == .error && rig.model.hint == FlowText.de.setupIsOpen && rig.setupRequests == before + 1)
     }
 
     /// Review C8: the earcon output starts at the press, not when the first audio (and the first partials) arrive.
@@ -127,7 +127,7 @@ import Testing
         #expect(rig.speech.starts.count <= 1 && !rig.speech.running)
     }
 
-    /// Review C6: a 401 of a request that started under the old token arrives after an import: the status stays.
+    /// Review C6: a 401 of a request that started under the old token arrives after a new token: the status stays.
     @Test func late401OfTheOldTokenKeepsTheNewStatus() async {
         let rig = Rig()
         await rig.start()
@@ -138,7 +138,7 @@ import Testing
         rig.speech.emit(.partial(dt: "Öffne WWT Ticket 999", st: ""))
         rig.speech.emit(.utterance([Hypothesis("Öffne WWT Ticket 999")], latencyMs: nil))
         _ = await rig.controller.settle(leaving: 1)
-        #expect(await rig.controller.importToken())
+        #expect(await rig.controller.saveToken("538-NewTestTokenAbc"))
         _ = await rig.controller.settle(leaving: 1)
         #expect(rig.controller.status.token == .present)
         rig.index?.releaseArchives()
@@ -178,7 +178,7 @@ import Testing
         #expect(rig.controller.status.indexError == nil)   // the network is not back yet: no menu error
         // Later failures show again.
         await rig.advance(Controller.fastRefreshInterval * 1.1)
-        #expect(rig.controller.status.indexError == FlowText.acUnreachable)
+        #expect(rig.controller.status.indexError == FlowText.de.acUnreachable)
     }
 
     @Test func workspaceObserverStartsAndStops() async {
@@ -200,9 +200,9 @@ import Testing
         let before = rig.setupRequests
         rig.chrome.defaultResult = .fallback(.undetermined)
         await rig.command("WWT Relaunch")
-        #expect(rig.phase == .success && rig.model.hint == FlowText.automationSetupHint)
+        #expect(rig.phase == .success && rig.model.hint == FlowText.de.automationSetupHint)
         #expect(rig.controller.status.chromeAutomation == .notDetermined && rig.controller.needsAttention)
-        #expect(rig.controller.statusLines.contains(AppText.chromeAutomationMissing))
+        #expect(rig.controller.statusLines.contains(AppText.de.chromeAutomationMissing))
         #expect(rig.controller.menuIcon.attention)
         #expect(rig.setupRequests == before)                 // not over the success card
         await rig.advance(FlowTimings().hintHold + 0.1)
@@ -247,11 +247,11 @@ import Testing
         await rig.start()
         let model = OnboardingModel(controller: rig.controller, copy: { _ in })
         await model.refresh()
-        #expect(model.steps.first { $0.id == .chrome }?.status == AppText.chromeNotRunning)
+        #expect(model.steps.first { $0.id == .chrome }?.status == AppText.de.chromeNotRunning)
         rig.permissions.isChromeRunning = true
         await model.refresh()
         let row = model.steps.first { $0.id == .chrome }
-        #expect(row?.status == AppText.chromeNotDetermined && row?.action?.kind == .requestAutomation && row?.action?.enabled == true)
+        #expect(row?.status == AppText.de.chromeNotDetermined && row?.action?.kind == .requestAutomation && row?.action?.enabled == true)
         #expect(rig.controller.status.chromeAutomation == .notDetermined)
     }
 }
@@ -270,24 +270,24 @@ import Testing
         #expect(AppText.streamDeckCommands(sourceRoot: nil).hasPrefix("cd ac-voice/streamdeck && "))
     }
 
-    /// Review U24: a stored token hides the paste field behind "Anderen Token einfügen"; the autostart row lets the
-    /// switch speak; "Fertig" says how to try it.
+    /// Review U24: a stored token hides the sign-in fields behind "Neu anmelden oder Adresse ändern"; the autostart
+    /// row lets the switch speak; "Fertig" says how to try it.
     @Test func rowsShowOnlyWhatIsToDo() async {
         let rig = Rig()
         await rig.start()
         let model = OnboardingModel(controller: rig.controller, copy: { _ in })
-        #expect(!model.showsTokenField)
-        model.replacingToken = true
-        #expect(model.showsTokenField)
+        #expect(!model.showsSignIn)
+        model.beginSignInAgain()
+        #expect(model.showsSignIn && !model.showsTokenSignIn)
         #expect(model.steps.first { $0.id == .autostart }?.status.isEmpty == true)
         rig.login.statusValue = .requiresApproval
         await model.refresh()
         let autostart = model.steps.first { $0.id == .autostart }
-        #expect(autostart?.status == LoginItemStatus.requiresApproval.hint && autostart?.action?.kind == .openLoginItems)
+        #expect(autostart?.status == LoginItemStatus.requiresApproval.hint(.de) && autostart?.action?.kind == .openLoginItems)
         #expect(model.launchAtLogin)
         #expect(model.tryItText == "Drück ⌃⌥Leertaste und sag „Meine Aufgaben“.")
         let missing = Rig(token: .missing)
         await missing.start()
-        #expect(OnboardingModel(controller: missing.controller, copy: { _ in }).showsTokenField)
+        #expect(OnboardingModel(controller: missing.controller, copy: { _ in }).showsSignIn)
     }
 }

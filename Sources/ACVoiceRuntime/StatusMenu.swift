@@ -52,14 +52,17 @@ public struct MenuState: Equatable, Sendable {
     public var attention: Bool
     /// Results of the Diagnose commands, shown inside the Diagnose submenu.
     public var diagnosticLines: [String]
+    /// Language of the menu titles (`Controller.language`).
+    public var language: AppLanguage
 
     public init(phase: FlowPhase = .idle, statusLines: [String] = [], hotkey: Hotkey? = nil,
                 loginItem: LoginItemStatus = .disabled, hasIndex: Bool = false, demoRunning: Bool = false,
                 selfTestRunning: Bool = false, chromeTestRunning: Bool = false, attention: Bool = false,
-                diagnosticLines: [String] = []) {
+                diagnosticLines: [String] = [], language: AppLanguage = .de) {
         self.phase = phase; self.statusLines = statusLines; self.hotkey = hotkey; self.loginItem = loginItem
         self.hasIndex = hasIndex; self.demoRunning = demoRunning; self.selfTestRunning = selfTestRunning
         self.chromeTestRunning = chromeTestRunning; self.attention = attention; self.diagnosticLines = diagnosticLines
+        self.language = language
     }
 }
 
@@ -69,29 +72,32 @@ public struct MenuIcon: Equatable, Sendable {
     public var attention: Bool
     /// A short-lived symbol instead of the phase symbol (a check after "Diagnose kopieren").
     public var flash: String?
-    public init(phase: FlowPhase = .idle, attention: Bool = false, flash: String? = nil) {
-        self.phase = phase; self.attention = attention; self.flash = flash
+    /// Language of the icon's VoiceOver label and tooltip.
+    public var language: AppLanguage
+    public init(phase: FlowPhase = .idle, attention: Bool = false, flash: String? = nil, language: AppLanguage = .de) {
+        self.phase = phase; self.attention = attention; self.flash = flash; self.language = language
     }
 }
 
 /// The status item's menu and icon as plain data.
 public enum StatusMenuModel {
     public static func items(_ s: MenuState) -> [MenuItemSpec] {
+        let text = AppText(s.language)
         var out = s.statusLines.map { MenuItemSpec(kind: .status, title: $0, enabled: false) }
         out.append(.separator)
-        var listen = MenuItemSpec(kind: .command(.listen), title: AppText.listen)
+        var listen = MenuItemSpec(kind: .command(.listen), title: text.listen)
         if let hk = s.hotkey, let eq = keyEquivalent(hk) {
             listen.key = eq.key
             listen.modifiers = eq.modifiers.rawValue
         }
         out.append(listen)
-        out.append(MenuItemSpec(kind: .command(.refreshIndex), title: AppText.refreshIndex, enabled: s.hasIndex))
-        out.append(MenuItemSpec(kind: .command(.setup), title: AppText.setup))
+        out.append(MenuItemSpec(kind: .command(.refreshIndex), title: text.refreshIndex, enabled: s.hasIndex))
+        out.append(MenuItemSpec(kind: .command(.setup), title: text.setup))
         // Waiting for approval counts as on (a dash), so a click turns it off (review C9).
-        out.append(MenuItemSpec(kind: .command(.launchAtLogin), title: AppText.launchAtLogin,
+        out.append(MenuItemSpec(kind: .command(.launchAtLogin), title: text.launchAtLogin,
                                 checked: s.loginItem == .enabled, mixed: s.loginItem == .requiresApproval))
         if s.loginItem == .requiresApproval {
-            out.append(MenuItemSpec(kind: .command(.openLoginItems), title: AppText.openLoginItems))
+            out.append(MenuItemSpec(kind: .command(.openLoginItems), title: text.openLoginItems))
         }
         out.append(.separator)
         // The tests need an idle flow: disabled while a command runs, instead of a notice nobody sees (review U9).
@@ -99,14 +105,14 @@ public enum StatusMenuModel {
         var diagnose = s.diagnosticLines.map { MenuItemSpec(kind: .status, title: $0, enabled: false) }
         if !diagnose.isEmpty { diagnose.append(.separator) }
         diagnose += [
-            MenuItemSpec(kind: .command(.selfTest), title: AppText.selfTest, enabled: idle && !s.selfTestRunning),
-            MenuItemSpec(kind: .command(.chromeTest), title: AppText.chromeTest, enabled: idle && !s.chromeTestRunning),
-            MenuItemSpec(kind: .command(.overlayDemo), title: AppText.overlayDemo, enabled: idle && !s.demoRunning),
-            MenuItemSpec(kind: .command(.copyDiagnostics), title: AppText.copyDiagnostics),
+            MenuItemSpec(kind: .command(.selfTest), title: text.selfTest, enabled: idle && !s.selfTestRunning),
+            MenuItemSpec(kind: .command(.chromeTest), title: text.chromeTest, enabled: idle && !s.chromeTestRunning),
+            MenuItemSpec(kind: .command(.overlayDemo), title: text.overlayDemo, enabled: idle && !s.demoRunning),
+            MenuItemSpec(kind: .command(.copyDiagnostics), title: text.copyDiagnostics),
         ]
-        out.append(MenuItemSpec(kind: .submenu(diagnose), title: AppText.diagnostics))
+        out.append(MenuItemSpec(kind: .submenu(diagnose), title: text.diagnostics))
         out.append(.separator)
-        out.append(MenuItemSpec(kind: .command(.quit), title: AppText.quit, key: "q",
+        out.append(MenuItemSpec(kind: .command(.quit), title: text.quit, key: "q",
                                 modifiers: NSEvent.ModifierFlags.command.rawValue))
         return out
     }
@@ -129,15 +135,8 @@ public enum StatusMenuModel {
     }
 
     /// VoiceOver label of the icon.
-    public static func accessibilityLabel(phase: FlowPhase, attention: Bool) -> String {
-        switch phase {
-        case .idle: return attention ? "AC Voice braucht die Einrichtung" : "AC Voice ist bereit"
-        case .listening, .retry: return "AC Voice hört zu"
-        case .processing, .opening: return "AC Voice verarbeitet den Befehl"
-        case .choices: return "AC Voice wartet auf deine Auswahl"
-        case .success: return "AC Voice hat die Seite geöffnet"
-        case .error: return "AC Voice meldet einen Fehler"
-        }
+    public static func accessibilityLabel(phase: FlowPhase, attention: Bool, language: AppLanguage = .de) -> String {
+        AppText(language).iconLabel(phase: phase, attention: attention)
     }
 
     /// Menu key equivalent for the hotkey: Space and F1 to F20. nil for other keys (the menu then shows none).
@@ -161,49 +160,51 @@ public enum StatusMenuModel {
 }
 
 extension Controller {
-    /// German status lines at the top of the menu.
+    /// Status lines at the top of the menu, in the app language.
     public var statusLines: [String] {
+        let text = AppText(language)
         var lines: [String] = []
         switch flow.phase {
-        case .idle: lines.append(AppText.ready)
-        case .listening, .retry: lines.append(AppText.phaseListening)
-        case .processing: lines.append(AppText.phaseProcessing)
-        case .opening: lines.append(AppText.phaseOpening)
-        case .choices: lines.append(AppText.phaseChoices)
-        case .success: lines.append(AppText.phaseSuccess)
-        case .error: lines.append(AppText.phaseError)
+        case .idle: lines.append(text.ready)
+        case .listening, .retry: lines.append(text.phaseListening)
+        case .processing: lines.append(text.phaseProcessing)
+        case .opening: lines.append(text.phaseOpening)
+        case .choices: lines.append(text.phaseChoices)
+        case .success: lines.append(text.phaseSuccess)
+        case .error: lines.append(text.phaseError)
         }
         switch status.token {
-        case .missing: lines.append(AppText.tokenMissing)
-        case .invalid: lines.append(AppText.tokenInvalid)
-        case .unreadable: lines.append(AppText.tokenUnreadable)
-        case .needsUserId: lines.append(AppText.userIdMissing)
+        case .missing: lines.append(text.tokenMissing)
+        case .invalid: lines.append(text.tokenInvalid)
+        case .unreadable: lines.append(text.tokenUnreadable)
+        case .needsUserId: lines.append(text.userIdMissing)
         case .present, .unknown: break
         }
-        if services.permissions.microphone != .granted { lines.append(AppText.micMissing) }
-        if status.chromeAutomation == .notDetermined { lines.append(AppText.chromeAutomationMissing) }
+        if services.permissions.microphone != .granted { lines.append(text.micMissing) }
+        if status.chromeAutomation == .notDetermined { lines.append(text.chromeAutomationMissing) }
         switch status.speech {
-        case .warming: lines.append(AppText.speechWarming)
-        case .unavailable: lines.append(AppText.speechUnavailable)
+        case .warming: lines.append(text.speechWarming)
+        case .unavailable: lines.append(text.speechUnavailable)
         case .ready: break
         }
         if let e = status.indexError { lines.append(e) }
-        if index != nil { lines.append(status.projects > 0 ? AppText.indexCount(status.projects) : AppText.indexEmpty) }
+        if index != nil { lines.append(status.projects > 0 ? text.indexCount(status.projects) : text.indexEmpty) }
         if let e = status.hotkeyError { lines.append(e) }
         if let e = status.ipcError { lines.append(e) }
         if let t = status.loginMessage { lines.append(t) }
-        if isDemoRunning { lines.append(AppText.demoRunning) }
+        if isDemoRunning { lines.append(text.demoRunning) }
         if let t = status.notice { lines.append(t) }
         return lines
     }
 
     /// Results of the Diagnose commands, inside the Diagnose submenu (they do not crowd the top of the menu).
     public var diagnosticLines: [String] {
+        let text = AppText(language)
         var lines: [String] = []
         if status.selfCheckRunning {
-            lines.append(AppText.selfTestRunning)
+            lines.append(text.selfTestRunning)
         } else if let c = status.selfCheck {
-            lines.append(c.passed ? AppText.selfTestPassed(ms: c.elapsedMs) : c.message)
+            lines.append(c.passed ? text.selfTestPassed(ms: c.elapsedMs) : text.localized(c.message))
         }
         if let t = status.chromeTest { lines.append(t) }
         if let t = status.chromeFront { lines.append(t) }
@@ -217,11 +218,13 @@ extension Controller {
                          hotkey: config.hotkey.enabled && status.hotkeyError == nil ? config.hotkey : nil,
                          loginItem: loginStatus, hasIndex: index != nil, demoRunning: isDemoRunning,
                          selfTestRunning: status.selfCheckRunning, chromeTestRunning: status.chromeTestRunning,
-                         attention: needsAttention, diagnosticLines: diagnosticLines)
+                         attention: needsAttention, diagnosticLines: diagnosticLines, language: language)
     }
 
     /// The menu bar icon: phase, badge and flash only.
-    public var menuIcon: MenuIcon { MenuIcon(phase: flow.phase, attention: needsAttention, flash: iconFlash) }
+    public var menuIcon: MenuIcon {
+        MenuIcon(phase: flow.phase, attention: needsAttention, flash: iconFlash, language: language)
+    }
 }
 
 /// Builds an `NSMenu` from specs. No window and no status item involved, so tests can build menus too.
@@ -311,7 +314,7 @@ public final class StatusMenuController: NSObject, NSMenuDelegate {
         let symbol = StatusMenuModel.symbol(s)
         guard symbol != shownSymbol else { return }
         shownSymbol = symbol
-        let label = StatusMenuModel.accessibilityLabel(phase: s.phase, attention: s.attention)
+        let label = StatusMenuModel.accessibilityLabel(phase: s.phase, attention: s.attention, language: s.language)
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
             ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: label)
         image?.isTemplate = true

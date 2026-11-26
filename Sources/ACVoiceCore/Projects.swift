@@ -52,14 +52,22 @@ public struct ProjectEntry: Sendable, Hashable, Identifiable {
     public let type: String?
     public var signals: Signals
     /// Spoken aliases for this project: config aliases of its code, learned aliases and the company name.
-    public var aliases: [String] { didSet { aliasSeqs = Self.aliasSequences(aliases) } }
+    public var aliases: [String] {
+        didSet { aliasSeqs = Self.aliasSequences(aliases); englishAliasSeqs = Self.englishAliasSequences(aliases) }
+    }
 
     let codeSeqs: [[String]]
     /// Title keys. `Resolver.init` rewrites them to canonical forms shared across projects.
     var titleKeys: [String]
+    /// Phonetic keys of `titleKeys`: Koelner Phonetik for German speech, `Fuzzy.metaphone` for English speech.
     var titleCologne: [String]
+    var titleMetaphone: [String]
     let typeKey: String?
     private(set) var aliasSeqs: [[String]]
+    /// `aliasSeqs` for English commands: without the words an English query drops (`Parser.strip`), so "Bank of
+    /// Avalon" matches "open Bank of Avalon". An alias that shrinks to one word is left out, because the collision
+    /// checks of company aliases only saw the full alias ("The Shop" would become "shop").
+    private(set) var englishAliasSeqs: [[String]]
 
     static let titleStop: Set<String> = ["der", "die", "das", "und", "of", "the", "for", "fur", "von", "a", "an", "to"]
 
@@ -90,8 +98,13 @@ public struct ProjectEntry: Sendable, Hashable, Identifiable {
         } else { codeSeqs = [] }
         titleKeys = TextNorm.tokenize(Self.dropVersionFractions(rest)).map(\.key).filter { !$0.isEmpty && !Self.titleStop.contains($0) }
         titleCologne = titleKeys.map(Fuzzy.cologne)
+        titleMetaphone = titleKeys.map(Fuzzy.metaphone)
         aliasSeqs = Self.aliasSequences(aliases)
+        englishAliasSeqs = Self.englishAliasSequences(aliases)
     }
+
+    /// Phonetic keys of the title words for speech in `language`.
+    func titlePhonetic(_ language: AppLanguage) -> [String] { language == .de ? titleCologne : titleMetaphone }
 
     /// Comparison key of a code as written in config ("S+K" -> "sk", "Hollenstein TS" -> "hollenstein ts").
     public static func codeKey(_ code: String) -> String {
@@ -120,6 +133,17 @@ public struct ProjectEntry: Sendable, Hashable, Identifiable {
 
     static func aliasSequences(_ aliases: [String]) -> [[String]] {
         aliases.map { TextNorm.tokenize($0).map(\.key).filter { !$0.isEmpty } }.filter { !$0.isEmpty }
+    }
+
+    /// Alias key sequences for commands in `language`.
+    func spokenAliasSeqs(_ language: AppLanguage) -> [[String]] { language == .de ? aliasSeqs : englishAliasSeqs }
+
+    static func englishAliasSequences(_ aliases: [String]) -> [[String]] {
+        aliases.compactMap { alias in
+            let all = TextNorm.tokenize(alias).filter { !$0.key.isEmpty }
+            let kept = Parser.strip(all, .en).map(\.key).filter { !$0.isEmpty }
+            return kept.isEmpty || (kept.count == 1 && all.count > 1) ? nil : kept
+        }
     }
 
     /// Key of a single-token code, used for fuzzy code matching ("WWD" -> WWT).

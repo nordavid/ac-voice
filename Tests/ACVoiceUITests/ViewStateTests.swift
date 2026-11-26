@@ -28,13 +28,13 @@ import ACVoiceFlow
     @Test func listeningCold() {
         let s = OverlayViewState(model: Self.model(.listening) {
             $0.warming = true
-            $0.message = FlowText.loadingModel
+            $0.message = FlowText.de.loadingModel
         })
         #expect(s.tone == .warming)
         #expect(!s.micLive)
         // Review U17: before the first audio, "Ich höre zu" would invite speech the mic cannot hear yet.
-        #expect(s.headline == .placeholder(OverlayText.micStarting, dimmed: false))
-        #expect(s.lines == [OverlayLine(.status, FlowText.loadingModel, symbol: "arrow.down.circle")])
+        #expect(s.headline == .placeholder(OverlayText.de.micStarting, dimmed: false))
+        #expect(s.lines == [OverlayLine(.status, FlowText.de.loadingModel, symbol: "arrow.down.circle")])
         #expect(s.rows.isEmpty && s.footer == nil && s.deadline == nil)
         #expect(s.phaseStart == Self.t0)
     }
@@ -53,7 +53,7 @@ import ACVoiceFlow
 
     @Test func hotMicWithoutTranscriptIsNotDimmed() {
         let s = OverlayViewState(model: Self.model(.listening) { $0.micReady = true })
-        #expect(s.headline == .placeholder(OverlayText.listening, dimmed: false))
+        #expect(s.headline == .placeholder(OverlayText.de.listening, dimmed: false))
         #expect(s.lines.isEmpty)
     }
 
@@ -61,24 +61,24 @@ import ACVoiceFlow
         let s = OverlayViewState(model: Self.model(.retry) {
             $0.micReady = true
             $0.transcript = Transcript(stable: "Hallo Welt")
-            $0.message = FlowText.notUnderstoodRetry
+            $0.message = FlowText.de.notUnderstoodRetry
         })
         #expect(s.tone == .listening)
         #expect(s.headline == .transcript(stable: "Hallo Welt", volatile: ""))
-        #expect(s.lines == [OverlayLine(.alert, FlowText.notUnderstoodRetry, symbol: "arrow.counterclockwise")])
+        #expect(s.lines == [OverlayLine(.alert, FlowText.de.notUnderstoodRetry, symbol: "arrow.counterclockwise")])
     }
 
     @Test func processingWithSearchMessage() {
         let s = OverlayViewState(model: Self.model(.processing) {
             $0.transcript = Transcript(stable: "Öffne WWT Ticket 412")
-            $0.message = FlowText.searchingTicket(412)
+            $0.message = FlowText.de.searchingTicket(412)
         })
         #expect(s.tone == .processing)
         #expect(s.headline.text == "Öffne WWT Ticket 412")
         #expect(s.lines == [OverlayLine(.status, "Suche Ticket 412 …", symbol: "magnifyingglass")])
         // Nothing heard yet: a neutral placeholder.
         let empty = OverlayViewState(model: Self.model(.processing))
-        #expect(empty.headline == .placeholder(OverlayText.working, dimmed: false))
+        #expect(empty.headline == .placeholder(OverlayText.de.working, dimmed: false))
     }
 
     /// Review U10: the target takes the headline at opening and keeps it through success; only line 2 changes.
@@ -89,7 +89,7 @@ import ACVoiceFlow
         })
         #expect(s.tone == .processing)
         #expect(s.headline == .title("WWT: Website Relaunch"))
-        #expect(s.lines == [OverlayLine(.status, OverlayText.openingInChrome, symbol: "arrow.up.forward")])
+        #expect(s.lines == [OverlayLine(.status, OverlayText.de.openingInChrome, symbol: "arrow.up.forward")])
         let clicked = OverlayViewState(model: Self.model(.opening) { $0.preview = "WWT: Website Relaunch" })
         #expect(clicked.headline == s.headline && clicked.lines == s.lines)
         let done = OverlayViewState(model: Self.model(.success) {
@@ -116,7 +116,7 @@ import ACVoiceFlow
         #expect(s.rows[0].markers == [.favorite, .recent])
         #expect(s.rows[0].ticket == nil)
         #expect(s.rows[0].accessibilityLabel == "1, Website Relaunch, WWT AGIL, Favorit, Zuletzt genutzt")
-        #expect(s.footer == ChoiceFooterState(hint: OverlayText.defaultChoiceHint, hintIsAlert: false, hintIsLive: false,
+        #expect(s.footer == ChoiceFooterState(hint: OverlayText.de.defaultChoiceHint, hintIsAlert: false, hintIsLive: false,
                                               page: 0, pageCount: 1, nextCount: 0, isLastPage: true, tickets: false))
         #expect(s.footer?.moreText == nil)
         #expect(s.deadline == Self.t0.addingTimeInterval(6))
@@ -131,7 +131,7 @@ import ACVoiceFlow
         #expect(s.rows.map(\.index) == [0, 1, 2, 3])
         // Review U2: the last page leads back to page 1 ("mehr" wraps), it announces no "6 weitere".
         #expect(s.footer?.page == 1 && s.footer?.pageCount == 2 && s.footer?.isLastPage == true)
-        #expect(s.footer?.moreText == OverlayText.moreFromStart)
+        #expect(s.footer?.moreText == OverlayText.de.moreFromStart)
         // No transcript: the question is the headline.
         #expect(s.headline == .title("Welches der 10 Projekte?"))
         let first = OverlayViewState(model: Self.model(.choices) {
@@ -198,7 +198,7 @@ import ACVoiceFlow
     @Test func hintsAfterUnclearAndForOneItem() {
         let unclear = OverlayViewState(model: Self.model(.choices) {
             OverlayGallery.list(&$0, Self.wwt, page: 0, pageSize: 6, deadline: Self.t0)
-            $0.hint = FlowText.unclearAnswer("Hi.")
+            $0.hint = FlowText.de.unclearAnswer("Hi.")
             $0.hintIsAlert = true
         })
         #expect(unclear.footer?.hint == "„Hi.“ passt zu keiner Zeile. Sag eine Zahl." && unclear.footer?.hintIsAlert == true)
@@ -206,7 +206,7 @@ import ACVoiceFlow
             $0.transcript = Transcript(stable: "WWD")
             OverlayGallery.list(&$0, [Self.wwt[0]], page: 0, pageSize: 6, deadline: Self.t0)
         })
-        #expect(one.footer?.hint == FlowText.sayYesOrOne && one.footer?.hintIsAlert == false)
+        #expect(one.footer?.hint == FlowText.de.sayYesOrOne && one.footer?.hintIsAlert == false)
         #expect(one.lines == [OverlayLine(.question, "Dieses Projekt?")])
     }
 
@@ -260,29 +260,29 @@ import ACVoiceFlow
         })
         #expect(s.tone == .success)
         #expect(s.headline == .title("WWT: Website Relaunch"))
-        #expect(s.lines == [OverlayLine(.success, OverlayText.opened)])
+        #expect(s.lines == [OverlayLine(.success, OverlayText.de.opened)])
         let hinted = OverlayViewState(model: Self.model(.success) {
             $0.message = "WWT: Website Relaunch"
-            $0.hint = FlowText.automationHint
+            $0.hint = FlowText.de.automationHint
         })
         #expect(hinted.lines.map(\.style) == [.success, .alert])
-        #expect(hinted.lines[1].text == FlowText.automationHint)
+        #expect(hinted.lines[1].text == FlowText.de.automationHint)
     }
 
     @Test func errorQuotesWhatWasHeard() {
         let s = OverlayViewState(model: Self.model(.error) {
             $0.transcript = Transcript(stable: "Öffne WWT Ticket 412")
-            $0.message = FlowText.ticketNotFound(412, code: "WWT")
+            $0.message = FlowText.de.ticketNotFound(412, code: "WWT")
         })
         #expect(s.tone == .error)
         #expect(s.headline == .title("WWT hat kein Ticket 412"))
         #expect(s.lines == [OverlayLine(.quote, "„Öffne WWT Ticket 412“")])
         // Review U27: the next step under the error.
         let bare = OverlayViewState(model: Self.model(.error) {
-            $0.message = FlowText.nothingHeard
-            $0.hint = FlowText.hint(forError: FlowText.nothingHeard)
+            $0.message = FlowText.de.nothingHeard
+            $0.hint = FlowText.de.hint(forError: FlowText.de.nothingHeard)
         })
-        #expect(bare.lines == [OverlayLine(.alert, FlowText.tryMyTasks, symbol: "exclamationmark.triangle")])
+        #expect(bare.lines == [OverlayLine(.alert, FlowText.de.tryMyTasks, symbol: "exclamationmark.triangle")])
     }
 
     @Test func structureIgnoresTextOnlyChanges() {
@@ -346,7 +346,7 @@ import ACVoiceFlow
     }
 
     @Test func overlayStringsFollowTheStyleRules() {
-        for s in OverlayText.all {
+        for s in OverlayText.de.all {
             #expect(!s.contains("–") && !s.contains("—"), "\(s)")
             #expect(!s.contains(":"), "\(s)")
             let lower = s.lowercased()

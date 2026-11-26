@@ -6,6 +6,7 @@
 import { Resvg } from "@resvg/resvg-js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { APP_MISSING } from "../src/i18n.js";
 import { glyphSvg, keySvg, marketplaceSvg } from "../src/icons.js";
 import type { StateMsg } from "../src/protocol.js";
 import { renderVoice } from "../src/render.js";
@@ -38,16 +39,16 @@ pair("imgs/actions/voice/key", () => keySvg(), 72);
 // Gallery of all faces for a visual check without hardware.
 const now = 1_732_440_005_000;
 const st = (phase: StateMsg["phase"], extra: Partial<StateMsg> = {}): StateMsg => ({ v: 1, t: "state", seq: 1, phase, since: now - 1000, ...extra });
-const online = (state: StateMsg, extra: Partial<View> = {}): View => ({ link: "online", state, level: 0, ...extra });
+const online = (state: StateMsg, extra: Partial<View> = {}): View => ({ link: "online", state, level: 0, lang: "de", ...extra });
 const choices = st("choices", {
 	since: now - 2000,
 	deadline: now + 3000,
 	choices: [1, 2, 3, 4].map((n) => ({ n, label: `Wahl ${n}` })),
 });
 const faces: { label: string; svg: string }[] = [
-	{ label: "offline", svg: renderVoice({ link: "offline", level: 0 }, now) },
-	{ label: "app missing", svg: renderVoice({ link: "offline", linkError: "App fehlt", level: 0 }, now) },
-	{ label: "launching", svg: renderVoice({ link: "launching", level: 0 }, now) },
+	{ label: "offline", svg: renderVoice({ link: "offline", level: 0, lang: "de" }, now) },
+	{ label: "app missing", svg: renderVoice({ link: "offline", linkError: APP_MISSING, level: 0, lang: "de" }, now) },
+	{ label: "launching", svg: renderVoice({ link: "launching", level: 0, lang: "de" }, now) },
 	{ label: "idle", svg: renderVoice(online(st("idle")), now) },
 	{ label: "listening (mic starting)", svg: renderVoice(online(st("listening", { micReady: false })), now) },
 	{ label: "listening, quiet", svg: renderVoice(online(st("listening", { micReady: true }), { level: 0.05 }), now) },

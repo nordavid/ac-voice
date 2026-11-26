@@ -1,3 +1,4 @@
+import ACVoiceCore
 import ServiceManagement
 
 /// Login item state, mapped from `SMAppService.Status`.
@@ -22,12 +23,16 @@ public enum LoginItemStatus: String, Sendable, Equatable {
     /// Registered: enabled, or waiting for the user's approval. The menu shows it as on, and a click turns it off.
     public var isOn: Bool { self == .enabled || self == .requiresApproval }
 
-    /// German hint for the menu, nil when nothing is to do.
-    public var hint: String? {
+    /// Hint for the menu in the app language, nil when nothing is to do.
+    public func hint(_ language: AppLanguage) -> String? {
+        let de = language == .de
         switch self {
         case .enabled, .disabled: return nil
-        case .requiresApproval: return "Erlaube AC Voice in den Systemeinstellungen unter Anmeldeobjekte."
-        case .notFound: return "Installiere AC Voice in deinem Programme-Ordner."
+        case .requiresApproval:
+            return de ? "Erlaube AC Voice in den Systemeinstellungen unter Anmeldeobjekte."
+                : "Allow AC Voice in System Settings under Login Items."
+        case .notFound:
+            return de ? "Installiere AC Voice in deinem Programme-Ordner." : "Install AC Voice in your Applications folder."
         }
     }
 }

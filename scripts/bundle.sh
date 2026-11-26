@@ -20,7 +20,8 @@
 #   SWIFT=PATH            swift executable (default: swift)
 #
 # Output: $OUT/AC Voice.app with Contents/MacOS/AC Voice, Info.plist rendered from Resources/Info.plist.in,
-# Resources/AppIcon.icns and the SwiftPM resource bundles of the app's targets. The script ends with
+# Resources/AppIcon.icns, Resources/de.lproj and en.lproj (the permission prompts per system language) and the SwiftPM
+# resource bundles of the app's targets. The script ends with
 # `codesign --verify --strict` and prints the designated requirement. It never launches the app.
 set -euo pipefail
 
@@ -163,6 +164,16 @@ ENTITLEMENTS="$PKG/Resources/ACVoice.entitlements"
 ICON="$PKG/Resources/AppIcon.icns"
 [ -f "$PLIST_IN" ] || die "missing $PLIST_IN"
 [ -f "$ICON" ] || die "missing $ICON (run: swift scripts/make-icon.swift)"
+# One lproj per language of the app. Each holds the three usage descriptions of Info.plist.in.
+LPROJS=(de en)
+for l in "${LPROJS[@]}"; do
+  strings_file="$PKG/Resources/$l.lproj/InfoPlist.strings"
+  [ -f "$strings_file" ] || die "missing $strings_file"
+  plutil -lint -s "$strings_file" || die "invalid $strings_file"
+  for key in NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription NSAppleEventsUsageDescription; do
+    grep -q "\"$key\"" "$strings_file" || die "$strings_file lacks $key"
+  done
+done
 if [ "$HARDENED" = "1" ]; then
   [ -f "$ENTITLEMENTS" ] || die "missing $ENTITLEMENTS"
   plutil -lint -s "$ENTITLEMENTS" || die "invalid $ENTITLEMENTS"
@@ -190,6 +201,10 @@ mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BIN_DIR/$PRODUCT" "$STAGE/Contents/MacOS/$EXECUTABLE"
 chmod 755 "$STAGE/Contents/MacOS/$EXECUTABLE"
 cp "$ICON" "$STAGE/Contents/Resources/AppIcon.icns"
+for l in "${LPROJS[@]}"; do
+  mkdir -p "$STAGE/Contents/Resources/$l.lproj"
+  cp "$PKG/Resources/$l.lproj/InfoPlist.strings" "$STAGE/Contents/Resources/$l.lproj/InfoPlist.strings"
+done
 printf 'APPL????' > "$STAGE/Contents/PkgInfo"
 
 # Info.plist: substitute the placeholders, then normalize to plain XML (drops the template comment).
@@ -240,5 +255,5 @@ echo "built:      $APP"
 echo "version:    $VERSION ($BUILD_NUMBER), $CONFIG"
 echo "identity:   $SIGN_HASH $SIGN_NAME"
 echo "hardened:   $([ "$HARDENED" = "1" ] && echo "yes, entitlements $(basename "$ENTITLEMENTS")" || echo no)"
-echo "resources:  AppIcon.icns${BUNDLES[*]+ ${BUNDLES[*]}}"
+echo "resources:  AppIcon.icns ${LPROJS[*]/%/.lproj}${BUNDLES[*]+ ${BUNDLES[*]}}"
 echo "designated: ${DR:-unknown}"

@@ -31,7 +31,8 @@ enum ChoiceBuilder {
         }
     }
 
-    static func tickets(_ refs: [TaskRef], projects: [Int: ProjectEntry], mine: Set<Int>, now: Date) -> [ChoiceItem] {
+    static func tickets(_ refs: [TaskRef], projects: [Int: ProjectEntry], mine: Set<Int>, now: Date,
+                        texts: FlowText = .de) -> [ChoiceItem] {
         let entries = refs.map { projects[$0.projectId] }
         let labels = Self.labels(entries)
         return refs.enumerated().map { i, ref in
@@ -43,7 +44,7 @@ enum ChoiceBuilder {
             if ref.isCompleted { badges.insert(.completed) }
             return ChoiceItem(n: i + 1, label: p == nil ? "#\(ref.projectId)" : labels[i], title: p?.title ?? name,
                               code: p?.code, type: p?.type, displayName: p.map(display) ?? name,
-                              detail: FlowText.ticketTitle(shown, project: name), badges: badges,
+                              detail: texts.ticketTitle(shown, project: name), badges: badges,
                               target: .task(projectId: ref.projectId, taskId: ref.id, number: ref.number))
         }
     }
@@ -87,40 +88,40 @@ enum ChoiceBuilder {
 /// Live preview, live cancel and hesitations from DT partials (PLAN 2.3, REVIEW M1). The hangover rule and the
 /// dangling-word rule live in Core (`HangoverPolicy`, `Parser.looksIncomplete`); the flow owns the values
 /// (`FlowTimings.hangovers`) and sends the result to the speech layer.
+/// Every rule reads the language of the voice commands (`FlowEnv.language`).
 enum LivePolicy {
-    /// Cancel words safe to act on in a partial. "nein" and "egal" are not: "Nein, Ticket 412" goes on.
-    static let strongCancel: Set<String> = ["abbrechen", "abbruch", "stopp", "stop", "cancel"]
-
-    static func isStrongCancel(_ text: String) -> Bool {
-        TextNorm.tokenize(text).contains { strongCancel.contains($0.key) }
+    /// A cancel word safe to act on in a partial ("abbrechen", "cancel", "never mind", `Parser.isStrongCancel`).
+    /// "nein" and "egal" are not: "Nein, Ticket 412" goes on.
+    static func isStrongCancel(_ text: String, language: AppLanguage = .de) -> Bool {
+        Parser.isStrongCancel(text, language: language)
     }
 
     /// The text the hangover rule reads: the best hypothesis that heard the most words (DT or ST may lag behind on
     /// the last word), the first one on a tie.
-    static func leading(_ hyps: [Hypothesis]) -> String {
+    static func leading(_ hyps: [Hypothesis], language: AppLanguage = .de) -> String {
         let best = hyps.filter { $0.weight >= 1 }
         var lead: (text: String, words: Int)?
         for h in best.isEmpty ? hyps : best {
-            let words = TextNorm.tokenize(h.text).count
+            let words = TextNorm.tokenize(h.text, language: language).count
             if lead == nil || words > lead!.words { lead = (h.text, words) }
         }
         return lead?.text ?? ""
     }
 
-    /// An answer that holds only dangling words and fillers so far ("die", "Nummer", "Öffne das", "äh"): the gate cut
-    /// a hesitation, so the flow listens on without counting a failed answer.
-    static func isHesitation(_ text: String) -> Bool {
-        !TextNorm.tokenize(text).isEmpty && Parser.looksIncomplete(text, choosing: true)
+    /// An answer that holds only dangling words and fillers so far ("die", "Nummer", "Öffne das", "äh", "the", "um"):
+    /// the gate cut a hesitation, so the flow listens on without counting a failed answer.
+    static func isHesitation(_ text: String, language: AppLanguage = .de) -> Bool {
+        !TextNorm.tokenize(text, language: language).isEmpty && Parser.looksIncomplete(text, choosing: true, language: language)
     }
 
-    static func preview(_ i: Interpretation) -> String? {
+    static func preview(_ i: Interpretation, _ texts: FlowText = .de) -> String? {
         switch i {
         case .myTasks:
-            return FlowText.myTasks
+            return texts.myTasks
         case .project(.unique(let s), _):
             return ChoiceBuilder.display(s.project)
         case .project(.ambiguous(let list), _):
-            return FlowText.projectCount(list.count, code: commonCode(list.map(\.project)))
+            return texts.projectCount(list.count, code: commonCode(list.map(\.project)))
         case .task(let r):
             let project: String?
             switch r.projects {
@@ -128,7 +129,7 @@ enum LivePolicy {
             case .ambiguous(let list)?: project = commonCode(list.map(\.project))
             default: project = nil
             }
-            return FlowText.ticketTitle(r.number, project: project)
+            return texts.ticketTitle(r.number, project: project)
         default:
             return nil
         }

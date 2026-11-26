@@ -348,6 +348,28 @@ struct ChromeOpenerTests {
         #expect(!runner.handlers.contains { $0 != "chromestate" })
     }
 
+    /// The setup window changes the AC address without a restart (`ChromeService.setACBaseURL` in the app): from then on
+    /// only tabs on the new origin count as AC tabs, for the project hint and for reusing a tab.
+    @Test func newACAddressAppliesWithoutRestart() async throws {
+        let o = opener()
+        let old = "https://ac.example.com/projects/628", new = "https://ac.example.test/projects/693"
+        let both = chromeState([W(id: 1, tabs: [old, new], active: 1), W(id: 2, tabs: [new])])
+        runner.answer("chromestate", .value(both))
+        #expect(await o.activeProjectId() == 628)
+        o.setACBaseURL(URL(string: "https://ac.example.test")!)
+        #expect(o.settings.acBaseURL == URL(string: "https://ac.example.test")!)
+        // The active tab is on the old host: no AC tab, no project hint.
+        runner.answer("chromestate", .value(both), .value(chromeState([W(id: 1, tabs: [old, new], active: 2)])))
+        #expect(await o.activeProjectId() == nil)
+        #expect(await o.activeProjectId() == 693)
+        // An open reuses a tab on the new host and leaves the old one alone.
+        let target = URL(string: "https://ac.example.test/projects/1")!
+        runner.answer("chromestate", .value(chromeState([W(id: 5, tabs: [old]), W(id: 6, tabs: [new])])))
+        #expect(try await o.open(target) == .reused)
+        let focus = try #require(runner.calls.last)
+        #expect(focus.0 == "focustab" && focus.1.first == .int(6))
+    }
+
     @Test func activeTabNeverPromptsOrLaunches() async throws {
         host.automation = .notDetermined
         let o = opener()

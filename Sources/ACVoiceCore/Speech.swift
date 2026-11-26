@@ -50,18 +50,20 @@ public struct HangoverPolicy: Sendable, Equatable {
 
     public static let standard = HangoverPolicy()
 
-    /// Command phase. A trailing numeral is never fast: the number may still grow.
-    public func command(text: String, interpretation: Interpretation) -> Double {
-        guard Parser.looksIncomplete(text) else { return interpretation.isCompleteIntent ? fast : command }
-        return Parser.endsInNumeral(text) ? trailingNumber : incomplete
+    /// Command phase. A trailing numeral is never fast: the number may still grow. `language`: the language of the
+    /// voice commands (`Interpreter.language`), for the dangling words and number words.
+    public func command(text: String, interpretation: Interpretation, language: AppLanguage = .de) -> Double {
+        guard Parser.looksIncomplete(text, language: language) else { return interpretation.isCompleteIntent ? fast : command }
+        return Parser.endsInNumeral(text, language: language) ? trailingNumber : incomplete
     }
 
     /// Answer phase: `answer`. A new command ("Öffne TKZ", "Ticket 412") follows the command rules; `interpret`
     /// runs only then. A dangling answer word ("die", "nein") does not extend the live budget: DT shows the last word
     /// of a short answer late, so "die zweite" would wait for "zweite". The speech layer reopens an utterance whose
     /// final text dangles instead (`Parser.looksIncomplete(_:choosing:)`).
-    public func answer(text: String, outcome: SelectionOutcome, command interpret: () -> Interpretation) -> Double {
-        if case .command = outcome { return command(text: text, interpretation: interpret()) }
+    public func answer(text: String, outcome: SelectionOutcome, language: AppLanguage = .de,
+                       command interpret: () -> Interpretation) -> Double {
+        if case .command = outcome { return command(text: text, interpretation: interpret(), language: language) }
         return answer
     }
 }

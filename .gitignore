@@ -10,6 +10,7 @@ dist/
 # Private data: real project names, recordings, generated TTS audio, AC dumps
 Tests/Fixtures/private/
 Tests/Fixtures/tts/
+Tests/Fixtures/tts-en/
 Tests/Fixtures/recordings/
 
 # Research spikes are reference material for porting, not part of the build. They contain real project names

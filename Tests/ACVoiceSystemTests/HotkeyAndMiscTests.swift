@@ -87,7 +87,7 @@ struct HotkeyTests {
 
     @Test func messagesFollowTheStyle() {
         let all = [HotkeyError.invalid, .registrationFailed(Int32(eventHotKeyExistsErr)), .registrationFailed(-1),
-                   .handlerInstallFailed(-1)].map(\.message)
+                   .handlerInstallFailed(-1)].map { $0.message(.de) }
         #expect(all.contains("Eine andere App nutzt das Tastenkürzel. Ändere hotkey in config.json."))
         for m in all { #expect(styleViolations(m).isEmpty, "\(m)") }
     }
@@ -139,10 +139,10 @@ struct LoginItemTests {
     }
 
     @Test func hintsFollowTheStyle() {
-        #expect(LoginItemStatus.enabled.hint == nil)
-        #expect(LoginItemStatus.disabled.hint == nil)
+        #expect(LoginItemStatus.enabled.hint(.de) == nil)
+        #expect(LoginItemStatus.disabled.hint(.de) == nil)
         for s in [LoginItemStatus.requiresApproval, .notFound] {
-            let h = s.hint ?? ""
+            let h = s.hint(.de) ?? ""
             #expect(!h.isEmpty)
             #expect(styleViolations(h).isEmpty, "\(h)")
         }

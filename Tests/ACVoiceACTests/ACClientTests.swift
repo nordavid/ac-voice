@@ -110,7 +110,7 @@ struct ACClientTests {
         let good = "7-GoodTokenAbcdefghij"
         let server = StubServer { r in r.token == good ? .json("[]") : .unauthorized }
 
-        // Review P1: the provider had nothing new at first, then ac-mcp re-issued the token.
+        // Review P1: the provider had nothing new at first, then the user signed in again.
         let provider = SwitchableTokenProvider(initial: "7-ExpiredTokenAbcdefgh")
         let client = server.client(tokens: provider, renewalCooldown: .zero)
         await #expect(throws: ACError.unauthorized) { try await client.favorites() }
@@ -122,7 +122,7 @@ struct ACClientTests {
         #expect(server.requests.last?.token == good)
         #expect(provider.asked == 2)
 
-        // With the default cooldown the client waits, unless the app resets it after a re-import or paste.
+        // With the default cooldown the client waits, unless the app resets it after a sign-in or paste.
         let pasted = SwitchableTokenProvider(initial: "7-ExpiredTokenAbcdefgh")
         let app = server.client(tokens: pasted)
         await #expect(throws: ACError.unauthorized) { try await app.favorites() }

@@ -23,7 +23,7 @@ struct OverlayView: View {
             // Always in the tree, also when empty: rows inserted into a live ForEach run their own staggered
             // transitions (a container inserted as a whole would not).
             ChoiceListView(rows: state.rows, footer: state.footer, palette: palette, interactive: interactive,
-                           onChoose: onChoose)
+                           text: state.text, onChoose: onChoose)
         }
         .frame(width: OverlayMetrics.width, alignment: .leading)
         .background(alignment: .topLeading) { ambientGlow(palette) }
@@ -33,7 +33,7 @@ struct OverlayView: View {
         .background { CardShadow() }
         .onHover { hovering = interactive && $0 }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(OverlayText.overlay)
+        .accessibilityLabel(state.text.overlay)
     }
 
     // MARK: Header
@@ -61,7 +61,8 @@ struct OverlayView: View {
         .frame(minHeight: 92)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(state.accessibilityLabel)
-        .modifier(SecondsLeftValue(deadline: state.deadline, frozen: state.countdownFrozen, live: clock.isLive))
+        .modifier(SecondsLeftValue(deadline: state.deadline, frozen: state.countdownFrozen, live: clock.isLive,
+                                   text: state.text))
         .accessibilityAddTraits(.updatesFrequently)
     }
 
@@ -166,7 +167,7 @@ struct OverlayView: View {
         .buttonStyle(.plain)
         .padding(12)
         .allowsHitTesting(interactive)
-        .accessibilityLabel(OverlayText.close)
-        .accessibilityHint(OverlayText.a11yCloseHint)
+        .accessibilityLabel(state.text.close)
+        .accessibilityHint(state.text.a11yCloseHint)
     }
 }

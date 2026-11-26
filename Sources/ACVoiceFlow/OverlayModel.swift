@@ -127,6 +127,9 @@ public struct OverlayModel: Sendable, Equatable {
     public var micReady = false
     /// The speech model is still loading ("Sprachmodell lädt").
     public var warming = false
+    /// Language of the texts in this snapshot (`FlowEnv.language`). The overlay draws its own words in it, and the
+    /// Stream Deck plugin gets it as `IPC.State.lang`.
+    public var language: AppLanguage = .de
 
     public init() {}
 
@@ -156,7 +159,8 @@ public struct OverlayModel: Sendable, Equatable {
             // A held list has no running deadline: the key shows a full ring until the pointer leaves.
             deadline: isChoices && countdownFrozen == nil ? deadline.map(Self.epochMs) : nil,
             message: message ?? hint,
-            micReady: wire == .listening ? micReady : nil)
+            micReady: wire == .listening ? micReady : nil,
+            lang: language.rawValue)
     }
 
     static func epochMs(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }

@@ -12,7 +12,7 @@ Prototype from this pass: `spikes/architect/proto/`. It is a SwiftPM package wit
 - `swift test` runs 20 test functions (51 cases) and all pass in 0.05 s, headless **[V, this pass]**.
 - `acvoice-resolve` checks the resolver against the real project list (about 60 names). It prints ids only.
 
-Nothing in ac-mcp changed (`git status` there is clean). I read 2 files in ac-mcp. I made no AC calls, touched no microphone or Chrome, and no prompts appeared.
+No other local repository changed. I made no AC calls, touched no microphone or Chrome, and no prompts appeared.
 
 ---
 
@@ -31,7 +31,7 @@ Nothing in ac-mcp changed (`git status` there is clean). I read 2 files in ac-mc
 | Choices UX | Up to 6 visible, numbered absolutely, "mehr" pages. The mic stays open in the same analyzer session with a 6 s window that extends while the user speaks. Selection by voice ("zwei", a name) or by a click on an overlay row. **No Stream Deck choice keys** (user decision). A one-item list is a confirm prompt: "Sag ja oder nein" ("ja" or "eins" opens, "nein" closes it). The pointer resting on the list stops its countdown |
 | Chrome | In-process `NSAppleScript` handler, compiled once at launch, called by Apple Event. It reuses an AC tab (sets the URL, focuses it), else opens a new tab or window. If Chrome is not running or Automation is denied, it falls back to `NSWorkspace.open` **[script compiled V, runtime A]** |
 | AC data | GET only. A disk cache gives instant resolution. ETag revalidation runs on every key press, in parallel with speech. Resolution never waits on the network, except on a ticket archive miss (0.3-1 s) |
-| Secrets/config | Token in the login Keychain. A one-time import from ac-mcp reads `.ac-token-cache`, else `AC_TOKEN` in `.env`. On a 401 the app re-imports once. Non-secret `config.json` lives in Application Support. No runtime dependency on the ac-mcp repo |
+| Secrets/config | Token in the login Keychain, one item per AC host. The setup window signs in with e-mail and password: `POST /api/v1/issue-token` issues a token for AC Voice (the only write, outside the GET-only client); the password is never stored. Pasting a token is the alternative for single sign-on. A 401 marks the token invalid and the setup window asks for a new sign-in. Non-secret `config.json` lives in Application Support; the setup window writes its `acBaseURL` |
 | Signing | **Blocker:** the only Apple Development cert is revoked **[V]**. The user renews it in Xcode (preferred). Fallback: a self-signed code-signing cert in the login keychain **[V launches]** |
 | Autostart | `SMAppService.mainApp.register()` behind a "Beim Anmelden starten" toggle **[A]** |
 | Build | SwiftPM plus `scripts/bundle.sh` (no .xcodeproj), deployment target macOS 26.0. The SDK is 27.2, so 27-only APIs need a `#available` guard **[V]** |
@@ -85,7 +85,8 @@ ac-voice/
     ACVoiceAC/                     Foundation only
       ACClient.swift               GET-only client, ETag, 301 probe, archive pages
       IndexStore.swift             actor: load/persist/refresh, snapshot stream
-      TokenStore.swift             Keychain + ac-mcp import
+      TokenProvider.swift          Keychain token store, token helpers
+      TokenIssuer.swift            sign-in: POST /issue-token (the only write)
     ACVoiceSpeech/                 AVFoundation + Speech
       VoiceSession.swift           port of research MicPipeline.swift (+ SIMULATE file source)
       ContextBuilder.swift         contextual strings per phase (≤50)
@@ -203,18 +204,22 @@ public actor IndexStore {
     public func extendArchives(priority: [Int]) async  // background, favorites and time-record projects first
     public func ensureArchive(_ pids: [Int]) async -> Bool  // miss path, parallel pages, budget 2.5 s
 }
-public enum TokenStore {
-    static func load(account: String) -> String?                       // kSecClassGenericPassword, service "io.github.nordavid.acvoice"
-    static func save(_ token: String, account: String) throws
-    static func importFromACMCP(_ dir: URL) throws -> (token: String, url: URL?, userId: Int?)  // .ac-token-cache, else .env AC_TOKEN, plus AC_URL/AC_USER_ID
+public struct KeychainTokenStore: TokenProvider {   // kSecClassGenericPassword, service "io.github.nordavid.acvoice", account = AC host (+ ":port" when not 443)
+    func load() throws -> String?
+    func save(_ token: String) throws
+}
+public final class ACTokenIssuer {                 // separate from ACClient, which stays GET-only
+    init(base: URL)                                // https only; redirects refused; ephemeral session, 15 s timeout
+    func issueToken(username: String, password: String) async throws -> String
 }
 ```
 
-How `.ac-token-cache` works **[V, read in ac-mcp/src/index.ts]**:
-- The file is 0600 and holds the raw token.
-- ac-mcp prefers `AC_TOKEN` from `.env`. Otherwise it uses the cache, re-issues the token via `issue-token` on a 401 and rewrites the cache.
-- ac-voice therefore re-reads the cache once on a 401, then shows "AC-Token ungültig".
-- The user id comes from the config, else from the token prefix `538-…` **[V format, A that this holds for every token]**.
+How the token comes in:
+- Sign-in: `POST {base}/api/v1/issue-token` with `{"username", "password", "client_name": "AC Voice", "client_vendor": "AC Voice"}` answers `{"is_ok": 1, "token": "<userId>-<key>"}`. 401, 403 or `is_ok` false mean wrong credentials. The password lives only for this call; errors name the path only, never the password, the token or the body.
+- Paste: "Mit Token anmelden" in the setup window, for single sign-on setups.
+- On a 401 the Keychain store offers a token that was saved meanwhile, else none: the token is marked invalid and the setup window asks for a new sign-in.
+- The user id comes from the token prefix `538-…` **[V format, A that this holds for every token]**, else from `config.userId`. A pinned id that differs from the prefix is ignored: it belongs to another account or another AC address.
+- One Keychain item per origin (`KeychainTokenStore.account(for:)`: host, plus the port when it is not 443), so an address change to another host or port never sends a token to an origin it was not issued for. The setup window compares addresses in their stored form (`Config.normalizedBaseURL`): another spelling of the same address changes nothing.
 
 ### 2.3 ACVoiceSpeech (port of research `MicPipeline.swift`, which compiles warning-free [V])
 
@@ -270,7 +275,7 @@ policy and hands the `NSApplicationDelegate` calls to `AppCoordinator`. Everythi
 ```swift
 @MainActor public struct Services {            // every system service behind a protocol; tests pass fakes
     speech: SpeechServing                      // LiveSpeech: VoiceSession + MicSource, events as SpeechEvent(gen, signal)
-    tokens: TokenServing                       // LiveTokens: Keychain (private serial queue) + read-only ac-mcp import
+    tokens: TokenServing                       // LiveTokens: Keychain per AC host (private serial queue) + sign-in (ACTokenIssuer)
     makeIndex: (userId, Config) -> IndexServing // LiveIndex: IndexStore + ACClient with KeychainTokenStore
     permissions: PermissionsServing            // TCC status, requests only from setup-window clicks
     overlay: OverlayPresenting                 // ACVoiceUI.OverlayController
@@ -282,7 +287,8 @@ policy and hands the `NSApplicationDelegate` calls to `AppCoordinator`. Everythi
     init(services:timings:config:history:)
     func start() async                         // IPC socket, earcons, hotkey, token + cached index, warm-up, refresh timers
     func trigger(_ e: FlowEvent)               // IPC, hotkey ("hk-N" press/release), menu, URL scheme, overlay clicks
-    func importToken() / saveToken(_:) async   // Keychain, then ACClient.resetToken (or a new index), then refresh
+    func login(username:password:) / saveToken(_:) async  // Keychain, then ACClient.resetToken (or a new index), then refresh
+    func setACBaseURL(_:) async                // writes only acBaseURL, applies it to Chrome, Keychain account, index, flow
     func refreshIndexNow(), runSelfTest(), runChromeTest(), startDemo(loop:), setLaunchAtLogin(_:)
     func shutdown() async                      // timers, hotkey, socket, history, microphone
 }
@@ -318,8 +324,8 @@ success with a hint stays up to 15 s and fades 1 s after the pointer leaves.
 Background refresh: fast every 5 min, task lists + archives every 12 min (at launch only when older), both only
 while idle (busy → retry after 30 s), with a 10% timer tolerance. They pause while the Mac, its displays or the
 session sleep (NSWorkspace) and run 12 s after the wake; transport errors of the first 30 s after a wake stay out of
-the menu. A 401 marks the token invalid; a token import bumps a generation so late results of the old token (refresh
-and ticket path) never flip the status back. Chrome's Automation status is cached from preflights (launch, Chrome's
+the menu. A 401 marks the token invalid; a new token or a new address bumps a generation so late results of the old token
+(refresh and ticket path) never flip the status back. Chrome's Automation status is cached from preflights (launch, Chrome's
 start, the setup window) and open results; `.notDetermined` puts the badge on the icon and a status line in the menu,
 and the setup window opens once per run (at launch or Chrome's first start while idle, else after the command that
 fell back). `shutdown()` sends `.cancel` first and stops the speech layer through the same serial queue, so a start
@@ -331,8 +337,8 @@ menu is built when it opens) with the German menu "Zuhören" (hotkey as key equi
 "Einrichten …", "Beim Anmelden starten" (a dash while macOS waits for approval; a click turns it off), "Anmeldeobjekte
 öffnen …" (only then), "Diagnose" (the last test results, then "Spracherkennung testen", "Chrome testen", "Overlay
 vorführen", all off while a command runs, and "Diagnose kopieren", which flashes a check on the icon), "Beenden".
-Setup window (SwiftUI in an NSWindow, the app activates only for it) with one row per step: AC-Token, Mikrofon,
-Chrome, Sprachmodell, Stream Deck, Autostart. It opens by itself when the token or the microphone permission is
+Setup window (SwiftUI in an NSWindow, the app activates only for it) with one row per step: ActiveCollab (AC-Adresse,
+E-Mail, Passwort, "Anmelden", collapsed "Mit Token anmelden"), Mikrofon, Chrome, Sprachmodell, Stream Deck, Autostart. It opens by itself when the token or the microphone permission is
 missing, or when Chrome runs with Automation not determined (once per run). While it is open it re-reads the statuses
 when Chrome starts or quits and when it becomes key again (back from System Settings). "Befehle kopieren" uses the
 absolute source folder (`ACVoiceSourceRoot`, written by bundle.sh). `acvoice://press|cancel|setup`. `--demo` and
@@ -571,7 +577,7 @@ URLs: project `https://ac.example.com/projects/{id}`, task `https://ac.example.c
 3. All projects. One hit → open; up to 6 → choices ranked by prior.
 4. Otherwise, if n is at least the smallest task id on the instance (`TicketResolver.minGlobalId`), a global-id probe; else not found.
 
-**"Meine Aufgaben"** → `https://ac.example.com/users/{me}/tasks`, the tasks assigned to the user (confirmed by the user in the first test). `{me}` is `config.userId`, else the token prefix (`Controller.flowConfig`). While no user id is known, `/my-work` opens (route `my-work` with `section:"my_work"` exists in the bundle **[V]**). `config.myTasksPath` makes it configurable.
+**"Meine Aufgaben"** → `https://ac.example.com/users/{me}/tasks`, the tasks assigned to the user (confirmed by the user in the first test). `{me}` is the user id of the attached index (the token prefix, else `config.userId`), else `config.userId` (`Controller.flowConfig`). While no user id is known, `/my-work` opens (route `my-work` with `section:"my_work"` exists in the bundle **[V]**). `config.myTasksPath` makes it configurable.
 
 **Refresh cadence:**
 - On every press: conditional GETs for `/projects`, `/favorites` and `/users/{me}/tasks`, mostly 304 in 23-26 ms **[V]**. They finish long before end of speech.
@@ -588,7 +594,7 @@ URLs: project `https://ac.example.com/projects/{id}`, task `https://ac.example.c
 |---|---|---|---|
 | M0 | Repo, Package.swift, bundle.sh (with `SIGN_ID` override), Info.plist (`NSMicrophoneUsageDescription`, `NSAppleEventsUsageDescription`, `NSSpeechRecognitionUsageDescription`, LSUIElement, LSMinimumSystemVersion 26.0), entitlements (`device.audio-input`, `automation.apple-events`), hardened runtime. **Needs the new cert first** | `scripts/bundle.sh AC\ Voice` passes the revocation precheck; `codesign --verify --strict`; `open -g -b io.github.nordavid.acvoice` launches; `pgrep -x "AC Voice"` | 0.5 d |
 | M1 | ACVoiceCore: move the prototype in, add Routes, Config and History | `swift test --filter ACVoiceCoreTests` (prototype: 51 cases green in 0.05 s **[V]**); `acvoice resolve --snapshot <index.json> --cases Tests/resolve-cases.txt` regression list (ids only) | 1.5 d |
-| M2 | ACVoiceAC: ACClient (GET only by construction), IndexStore with disk cache, ETag, task index, archives, 301 probe; TokenStore + ac-mcp import | URLProtocol stub test asserts that every request is GET and that ETag/304 is handled; `acvoice index refresh --stats` prints counts and timings (expected: about 60 projects and over ten thousand task ids); `acvoice resolve "Öffne WWT Ticket 412" --url` prints the task URL | 2 d |
+| M2 | ACVoiceAC: ACClient (GET only by construction), IndexStore with disk cache, ETag, task index, archives, 301 probe; Keychain token store | URLProtocol stub test asserts that every request is GET and that ETag/304 is handled; `acvoice index refresh --stats` prints counts and timings (expected: about 60 projects and over ten thousand task ids); `acvoice resolve "Öffne WWT Ticket 412" --url` prints the task URL | 2 d |
 | M3 | ACVoiceSpeech: port VoiceSession, adaptive threshold, finalize timeout, hypotheses, ContextBuilder; `-D SIMULATE` file source | `scripts/make-tts-fixtures.sh` (Anna + Daniel mixed clips); `ACVOICE_SPEECH_TESTS=1 swift test --filter ACVoiceSpeechTests`: each clip yields the expected Interpretation; simulated real-time p90 speech end → final ≤ 750 ms for commands and ≤ 550 ms for answers; no mic and no prompt **[V research: file input needs no authorization]** | 2 d |
 | M4 **built** | VoiceFlow reducer + Controller, overlay (panel, orb, list, transitions), earcons, Carbon hotkey, StatusMenu, `--demo` mode cycling all states | Reducer tests with a fake clock cover every row of section 3 including timeouts, the retry limit and fastSelect; the research `fake-host/host.mjs` runs against the real app socket (keyDown → listening face < 5 ms); the user checks `--demo` visually | 3 d |
 | M5 **built** (manual checks open) | ChromeOpener + onboarding (mic request, Automation preflight off-main while Chrome runs), NSWorkspace fallback, -1743 hint | Manual with the user: `acvoice open https://ac.example.com/projects/628` reuses the AC tab; with Chrome closed → launch path; after `tccutil reset AppleEvents io.github.nordavid.acvoice` and a denial → fallback + hint | 1 d |
@@ -612,7 +618,7 @@ URLs: project `https://ac.example.com/projects/{id}`, task `https://ac.example.c
 | `set index to 1` raises the wrong window when several are open | [A] | Accepted for v1. AXRaise would need Accessibility, which is rejected |
 | SPA full reload on every URL change | [A] | Skip `set URL` when the URL is unchanged. v1.1 option: in-SPA navigation via `execute javascript` (needs the Chrome setting "Allow JavaScript from Apple Events") |
 | Keychain prompts after a re-sign | [A] | Stable cert → stable DR → no prompt. Fallback: 0600 file `~/Library/Application Support/ac-voice/token` |
-| Token expires or is re-issued by ac-mcp | [A] | On a 401, re-import from ac-mcp once, then show the error and a menu action. Own token via `POST /issue-token` is deferred to v1.1 (the password is never stored) |
+| Token expires or is revoked | [A] | On a 401, mark the token invalid, show it in the menu and ask for a new sign-in in the setup window (`POST /issue-token`, the password is never stored) |
 | Stream Deck hardware frame rate | [A] | Tick at 100 ms only while animating; fallback 200 ms |
 | ⌃⌥Space conflicts with input-source switching on other Macs | **[V]** disabled here | Configurable in the menu |
 | SDK 27.2 vs OS 26.6 | **[V]** | Deployment target 26.0; no `AnalyzerInputConverter`/`CaptureInputSequenceProvider` without `#available(macOS 27, *)` |
@@ -626,7 +632,7 @@ URLs: project `https://ac.example.com/projects/{id}`, task `https://ac.example.c
 
 **Manual steps:**
 1. **Signing:** Xcode > Settings > Accounts > Manage Certificates > "+" Apple Development. Then delete the revoked cert (`<sha1>`) from the login keychain. Alternative: Keychain Access > Certificate Assistant > Create a Certificate, type "Code Signing", self-signed.
-2. **AC token:** in onboarding, either "Aus ac-mcp übernehmen" (reads `ac-mcp/.ac-token-cache` or `.env`, read-only) or paste a token.
+2. **ActiveCollab:** in onboarding, enter the AC address, e-mail and password and click "Anmelden", or paste a token under "Mit Token anmelden".
 3. **Microphone:** click "Mikrofon erlauben" in onboarding (a one-time prompt for "AC Voice").
 4. **Chrome Automation:** with Chrome running, click "Chrome steuern erlauben" in onboarding (a one-time prompt).
 5. **Install:** run `scripts/install.sh` (puts the app in `~/Applications`), then turn on "Beim Anmelden starten".
@@ -640,7 +646,7 @@ URLs: project `https://ac.example.com/projects/{id}`, task `https://ac.example.c
 - Ambiguous code (WWT): always show the ranked list, most likely first; never auto-open.
 - No Stream Deck choice keys: select by voice or by clicking an overlay row.
 - Hotkey ⌃⌥Space. Earcons on.
-- Token: one-time import from ac-mcp into the Keychain.
+- Token: sign-in with e-mail and password in the setup window, token paste as the alternative; Keychain only.
 - Signing: the renewed Apple Development identity (the user signs the real build).
 - No wake word in v1; the key, the hotkey or a menu click triggers it.
 

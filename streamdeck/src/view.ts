@@ -1,3 +1,4 @@
+import { type Lang, parseLang } from "./i18n.js";
 import type { StateMsg } from "./protocol.js";
 
 /** Link state as the key shows it. `launching`: the app is starting, or connected without a snapshot yet. */
@@ -6,7 +7,7 @@ export type LinkStatus = "offline" | "launching" | "online";
 /** Everything the key face depends on, besides the clock. */
 export interface View {
 	link: LinkStatus;
-	/** German reason when the app cannot start ("App fehlt"). */
+	/** Why the app cannot start: a reason code (`APP_MISSING`) or a text. */
 	linkError?: string;
 	/** Latest snapshot of this connection; undefined while not online. */
 	state?: StateMsg;
@@ -14,14 +15,29 @@ export interface View {
 	level: number;
 	/** Epoch ms when the current choice list appeared; the countdown ring runs from here to `state.deadline`. */
 	windowStart?: number;
+	/** Language of the key captions: the app's (`state.lang`) once a snapshot named it, else the fallback. */
+	lang: Lang;
 }
 
 /** Folds link events into the `View`. Pure apart from the injected clock. */
 export class ViewModel {
-	readonly view: View = { link: "offline", level: 0 };
+	readonly view: View;
 	#listKey = "";
+	/** The language the app named last. The app keeps it for its whole run, so it outlives a dropped link. */
+	#appLang?: Lang;
 
-	constructor(private readonly now: () => number = Date.now) {}
+	/** `fallback`: the language before the app names its own (the Stream Deck language, `fromStreamDeck`). */
+	constructor(
+		private readonly now: () => number = Date.now,
+		fallback: Lang = "de",
+	) {
+		this.view = { link: "offline", level: 0, lang: fallback };
+	}
+
+	/** A new Stream Deck language. The app's language still wins once known. */
+	fallback(lang: Lang): void {
+		this.view.lang = this.#appLang ?? lang;
+	}
 
 	status(link: LinkStatus, error?: string): void {
 		this.view.link = link;
@@ -36,6 +52,11 @@ export class ViewModel {
 	}
 
 	state(s: StateMsg): void {
+		const lang = parseLang(s.lang);
+		if (lang) {
+			this.#appLang = lang;
+			this.view.lang = lang;
+		}
 		if (s.phase !== "listening") this.view.level = 0;
 		if (s.phase === "choices") {
 			// A new list (first one, "mehr", narrowed) restarts the ring. A deadline extension while the user

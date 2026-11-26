@@ -9,6 +9,8 @@ struct RecordedRequest: Sendable {
     var path: String
     var headers: [String: String]
     var hasBody: Bool
+    /// The request body (URLSession hands it over as a stream).
+    var body: Data?
     var token: String? { headers.first { $0.key.lowercased() == "x-angie-authapitoken" }?.value }
     var ifNoneMatch: String? { headers.first { $0.key.lowercased() == "if-none-match" }?.value }
 }
@@ -95,9 +97,10 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
         var path = url.path
         if path.hasPrefix("/api/v1") { path.removeFirst("/api/v1".count) }
         if let q = url.query { path += "?" + q }
+        let body = request.httpBody ?? request.httpBodyStream.map(Self.read)
         let recorded = RecordedRequest(method: request.httpMethod ?? "GET", path: path,
                                        headers: request.allHTTPHeaderFields ?? [:],
-                                       hasBody: request.httpBody != nil || request.httpBodyStream != nil)
+                                       hasBody: request.httpBody != nil || request.httpBodyStream != nil, body: body)
         let response = server.handle(recorded)
         let deliver: @Sendable () -> Void = { [self] in
             defer { server.finished() }
@@ -120,6 +123,19 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() { stopped.withLock { $0 = true } }
+
+    static func read(_ stream: InputStream) -> Data {
+        var data = Data()
+        stream.open()
+        defer { stream.close() }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            guard n > 0 else { break }
+            data.append(buffer, count: n)
+        }
+        return data
+    }
 }
 
 /// Counts renewals; hands out `fresh` once (or never when nil).
@@ -143,7 +159,7 @@ final class CountingTokenProvider: TokenProvider {
     }
 }
 
-/// A token source that changes from outside: ac-mcp re-issues a token, or the user pastes one. `token()` returns the
+/// A token source that changes from outside: the user signs in again or pastes a token. `token()` returns the
 /// current token; `refreshedToken` offers it when it differs from the rejected one. `failLoads` makes the first
 /// `token()` calls throw `noToken`.
 final class SwitchableTokenProvider: TokenProvider {

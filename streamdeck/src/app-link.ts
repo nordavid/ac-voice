@@ -1,11 +1,12 @@
 import net from "node:net";
+import { APP_MISSING } from "./i18n.js";
 import { encodeCmd, LineSplitter, parseAppMsg, type PluginCmd, type StateMsg } from "./protocol.js";
 import type { LinkStatus } from "./view.js";
 
 export type { LinkStatus } from "./view.js";
 
-/** German label on the key when LaunchServices cannot find the app. */
-export const APP_MISSING = "App fehlt";
+/** Link error when LaunchServices cannot find the app; the key names it in its language (`KEY_TEXTS`). */
+export { APP_MISSING };
 
 export interface LinkEvents {
 	/** `error` is set while the app is down for a known reason (launch failed). */

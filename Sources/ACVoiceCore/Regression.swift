@@ -15,6 +15,7 @@ import Foundation
 /// - `@signals 628 favorite timeRecords30d=8 ownOpenTasks=2 lastActivityDaysAgo=1` sets one project's signals
 ///   relative to the run's `now` (`@signals reset` clears all).
 /// - `@picks wwt=693x3` adds learned picks (`@picks reset` clears them).
+/// - `@language en` reads the following utterances as English commands (`@language de`, the default, as German).
 public enum Regression {
     public struct Case: Sendable {
         public var line: Int
@@ -23,6 +24,8 @@ public enum Regression {
         public var aliases: [String: [String]]
         public var signals: [Int: Signals]
         public var history: History
+        /// Language of the utterances (`@language`).
+        public var language: AppLanguage = .de
     }
 
     public struct Result: Sendable {
@@ -67,8 +70,10 @@ public enum Regression {
         return set(restA) == set(restE) && tailA == tailE
     }
 
-    public static func parse(_ text: String, now: Date) -> [Case] {
+    /// `language`: the language of the cases before the first `@language` directive.
+    public static func parse(_ text: String, now: Date, language start: AppLanguage = .de) -> [Case] {
         var aliases: [String: [String]] = [:], signals: [Int: Signals] = [:], history = History()
+        var language = start
         var cases: [Case] = []
         for (n, raw) in text.components(separatedBy: .newlines).enumerated() {
             let line = raw.trimmingCharacters(in: .whitespaces)
@@ -100,12 +105,14 @@ public enum Regression {
                         }
                     }
                     signals[id] = s
+                case "@language":
+                    language = arg.lowercased().hasPrefix("en") ? .en : .de
                 case "@picks":
                     if arg == "reset" { history = History(); continue }
                     for entry in arg.split(separator: ";") {
                         let kv = entry.split(separator: "=", maxSplits: 1)
                         guard kv.count == 2 else { continue }
-                        let q = TextNorm.queryKey(TextNorm.tokenize(String(kv[0])))
+                        let q = TextNorm.queryKey(TextNorm.tokenize(String(kv[0]), language: language))
                         let pc = kv[1].split(separator: "x")
                         guard let id = Int(pc[0].trimmingCharacters(in: .whitespaces)) else { continue }
                         let count = pc.count > 1 ? Int(pc[1]) ?? 1 : 1
@@ -121,7 +128,7 @@ public enum Regression {
             hyps += cols[1].components(separatedBy: " | ").map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }.map { Hypothesis($0) }
             cases.append(Case(line: n + 1, hypotheses: hyps, expected: cols[2].trimmingCharacters(in: .whitespaces),
-                              aliases: aliases, signals: signals, history: history))
+                              aliases: aliases, signals: signals, history: history, language: language))
         }
         return cases
     }
@@ -141,7 +148,7 @@ public enum Regression {
                 cache[setup] = r
                 return r
             }()
-            let interpreter = Interpreter(resolver: resolver, history: c.history)
+            let interpreter = Interpreter(resolver: resolver, history: c.history, language: c.language)
             let t0 = DispatchTime.now().uptimeNanoseconds
             let actual = describe(interpreter.command(c.hypotheses, now: now))
             let us = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1000

@@ -16,10 +16,10 @@ public struct RuntimeStatus: Sendable, Equatable {
     public enum Speech: Sendable, Equatable { case warming, ready, unavailable }
 
     public var token: Token = .unknown
-    /// Why the last token import or paste failed (German).
+    /// Why the last sign-in, token paste or address change failed (in the app language).
     public var tokenMessage: String?
     public var speech: Speech = .warming
-    /// The last refresh failed (German, `ACError.userMessage`).
+    /// The last refresh failed (`AppText.acError`, in the app language).
     public var indexError: String?
     public var lastRefresh: Date?
     public var projects = 0
@@ -56,6 +56,11 @@ public final class Controller {
     public private(set) var flow: VoiceFlow
     public private(set) var env: FlowEnv
     public private(set) var config: Config
+    /// Language of texts, voice commands and speech recognition, resolved once at launch from `Config.language`
+    /// and the macOS languages (`Services.preferredLanguages`). A change needs a restart.
+    public let language: AppLanguage
+    /// The menu's and the setup window's texts in `language`.
+    public var appText: AppText { AppText(language) }
     public private(set) var history: History
     /// The last published overlay snapshot.
     public private(set) var model = OverlayModel()
@@ -101,7 +106,8 @@ public final class Controller {
     private var backgroundTimers: [BackgroundJob: any TimerToken] = [:]
     private var fastRefreshRunning = false
     private var listsRefreshRunning = false
-    /// Bumped when a new token arrives: refresh results of the old token do not change the token status.
+    /// Bumped when a new token or a new AC address arrives: refresh results of the old token do not change the token
+    /// status.
     private var tokenGeneration = 0
     private var hotkeyCounter = 0
     private var heldHotkey: String?
@@ -134,8 +140,12 @@ public final class Controller {
         let hist = history ?? services.store.loadHistory()
         self.config = cfg
         self.history = hist
+        let lang = cfg.appLanguage(preferred: services.preferredLanguages)
+        language = lang
         flow = VoiceFlow(timings: timings, speechWarm: false)
-        env = FlowEnv(interpreter: Interpreter(projects: [], config: cfg, history: hist), config: cfg)
+        env = FlowEnv(interpreter: Interpreter(projects: [], config: cfg, history: hist, language: lang), config: cfg,
+                      language: lang)
+        model.language = lang
         rebuildInterpreter()
         wire()
     }
@@ -150,13 +160,18 @@ public final class Controller {
         do {
             try await services.ipc.start()
             status.ipcError = nil
+            // The socket's own idle snapshot has no language. A plugin that connects before the first press must
+            // still show its texts in the app's language, so the idle state with `lang` goes out right away.
+            var idle = model.ipcState()
+            idle.since = Int64((services.clock.now.timeIntervalSince1970 * 1000).rounded())
+            services.ipc.broadcast(idle)
         } catch IPCServerError.alreadyRunning {
             Log.event(.app, "app.secondInstance", level: .error)
             onSecondInstance?()
             return
         } catch {
             Log.error(.ipc, "ipc.start.failed", error)
-            status.ipcError = AppText.ipcUnavailable
+            status.ipcError = appText.ipcUnavailable
         }
         if config.earcons { services.earcons.prepare() }
         registerHotkey()
@@ -373,7 +388,7 @@ public final class Controller {
             return commandContext
         case let .answer(titles, firstNumber, hasMore):
             return ContextBuilder.answer(titles: titles, hasMore: hasMore, firstNumber: firstNumber,
-                                         limit: config.contextualStringLimit)
+                                         limit: config.contextualStringLimit, language: language)
         }
     }
 
@@ -616,7 +631,7 @@ public final class Controller {
 
     private func fetchArchive(_ projectIds: [Int], request: Int) {
         guard let index else {
-            send(.archiveFetched(request: request, complete: false, message: ACError.noToken.userMessage))
+            send(.archiveFetched(request: request, complete: false, message: appText.acError(.noToken)))
             return
         }
         let generation = tokenGeneration
@@ -626,16 +641,17 @@ public final class Controller {
             self.syncIndex()
             self.note(check.errors, generation: generation)
             Log.event(.index, "index.archives", .int("projects", projectIds.count), .bool("complete", check.complete))
-            self.send(.archiveFetched(request: request, complete: check.complete, message: check.error?.userMessage))
+            self.send(.archiveFetched(request: request, complete: check.complete, message: check.error.map(self.appText.acError)))
         }
     }
 
     private func probe(_ taskId: Int, request: Int) {
         guard let index else {
-            send(.probed(request: request, .failed, message: ACError.noToken.userMessage))
+            send(.probed(request: request, .failed, message: appText.acError(.noToken)))
             return
         }
         let generation = tokenGeneration
+        let text = appText
         spawn { [weak self] in
             let event: FlowEvent
             do {
@@ -644,7 +660,7 @@ public final class Controller {
             } catch {
                 let ac = error as? ACError
                 self?.note(ac.map { [$0] } ?? [], generation: generation)
-                event = .probed(request: request, .failed, message: ac?.userMessage)
+                event = .probed(request: request, .failed, message: ac.map(text.acError))
             }
             guard let self else { return }
             self.syncIndex()
@@ -684,20 +700,20 @@ public final class Controller {
         }
     }
 
-    /// `config` for the flow: without a `userId` in config.json, the user id of the attached index (the token prefix)
-    /// fills it, so "Meine Aufgaben" opens "/users/{me}/tasks". Never written back to config.json.
+    /// `config` for the flow: the user id of the attached index (`userId(hint:)`) fills `userId`, so "Meine Aufgaben"
+    /// opens "/users/{me}/tasks". Without an index the id from config.json stays. Never written back to config.json.
     var flowConfig: Config {
         var c = config
-        if c.userId == nil { c.userId = index?.userId }
+        if let id = index?.userId { c.userId = id }
         return c
     }
 
     private func rebuildInterpreter() {
         interpreterDirty = false
-        env.interpreter = Interpreter(projects: lastEntries ?? [], config: config, history: history)
+        env.interpreter = Interpreter(projects: lastEntries ?? [], config: config, history: history, language: language)
         env.config = flowConfig
         commandContext = ContextBuilder.command(projects: env.interpreter.resolver.projects, now: services.clock.now,
-                                                limit: config.contextualStringLimit)
+                                                limit: config.contextualStringLimit, language: language)
     }
 
     /// An AC error of the ticket path: a rejected token shows in the menu. `generation`: the token generation the
@@ -731,7 +747,7 @@ public final class Controller {
             let justWoke = wokeAt.map { services.clock.uptime - $0 < Self.wakeGrace } ?? false
             let transportOnly = r.errors.allSatisfy { if case .transport = $0 { return true }; return false }
             if !(justWoke && transportOnly) {
-                status.indexError = r.errors.first?.userMessage ?? FlowText.acUnreachable
+                status.indexError = r.errors.first.map(appText.acError) ?? FlowText(language).acUnreachable
             }
         } else if r.failed == 0 {
             status.indexError = nil
@@ -831,16 +847,17 @@ public final class Controller {
 
     // MARK: - Token
 
-    /// Reads the Keychain once at launch and attaches the index when a token exists.
+    /// Reads the Keychain item of the configured AC host (at launch and after an address change) and attaches the
+    /// index when a token exists.
     private func connectAC() async {
-        switch await services.tokens.stored() {
+        switch await services.tokens.stored(for: config.acBaseURL) {
         case .missing:
             setToken(.missing)
         case .unreadable(let message):
-            status.tokenMessage = message
+            status.tokenMessage = appText.localized(message)
             setToken(.unreadable)
         case .present(let hint):
-            guard let uid = config.userId ?? hint else {
+            guard let uid = userId(hint: hint) else {
                 setToken(.needsUserId)
                 return
             }
@@ -859,42 +876,109 @@ public final class Controller {
         syncIndex()
     }
 
-    /// Onboarding "Aus ac-mcp übernehmen".
+    /// Setup window "Anmelden": asks the AC at the configured address to issue a token for AC Voice, stores it in the
+    /// Keychain and continues like a pasted token (attach or reset the index, refresh). The password lives only for
+    /// this call. On a failure the token state stays and the token row shows why.
     @discardableResult
-    public func importToken() async -> Bool {
+    public func login(username: String, password: String) async -> Bool {
+        let base = config.acBaseURL
+        // Never send a password to the placeholder host.
+        guard !config.hasPlaceholderBaseURL else {
+            status.tokenMessage = appText.addressMissing
+            statusChanged()
+            return false
+        }
         do {
-            let hint = try await services.tokens.importFromACMCP()
+            let hint = try await services.tokens.login(base: base, username: username, password: password)
+            // The address changed while AC answered: the token belongs to the old host, `connectAC` already ran.
+            guard config.acBaseURL == base else { return false }
             await tokenChanged(userIdHint: hint)
             return true
         } catch {
-            tokenFailed(error)
+            status.tokenMessage = appText.loginMessage(error)
+            // ACError descriptions name the path only, never the password or the token.
+            Log.error(.index, "token.login.failed", error)
+            statusChanged()
             return false
         }
     }
 
-    /// Onboarding paste field.
+    /// Onboarding paste field ("Mit Token anmelden").
     @discardableResult
     public func saveToken(_ token: String) async -> Bool {
         do {
-            let hint = try await services.tokens.save(token)
+            let hint = try await services.tokens.save(token, for: config.acBaseURL)
             await tokenChanged(userIdHint: hint)
             return true
         } catch {
-            tokenFailed(error)
+            status.tokenMessage = (error as? ACError).map(appText.acError) ?? appText.tokenSaveFailed
+            Log.error(.index, "token.save.failed", error)
+            statusChanged()
             return false
         }
     }
 
-    private func tokenFailed(_ error: any Error) {
-        status.tokenMessage = (error as? ACError)?.userMessage ?? AppText.tokenImportFailed
-        Log.error(.index, "token.save.failed", error)
+    /// Setup window "AC-Adresse": checks the typed address (`Config.normalizedBaseURL`), writes only `acBaseURL` to
+    /// config.json and applies it without a restart. The Chrome opener, the Keychain account (the host), the index and
+    /// the flow use the new address from now on. The Keychain keeps one token per host, so a new host reads its own
+    /// item: without one the token row asks for a sign-in. Returns false for an invalid address (the row says why).
+    @discardableResult
+    public func setACBaseURL(_ text: String) async -> Bool {
+        guard let url = Config.normalizedBaseURL(text) else {
+            let empty = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            status.tokenMessage = empty ? appText.addressMissing : appText.addressInvalid
+            statusChanged()
+            return false
+        }
+        // Compare the stored forms: a hand-written "https://ac.example.test/" is the same AC as the typed address, so
+        // the index, the token state and config.json stay as they are.
+        guard url != Config.normalizedBaseURL(config.acBaseURL.absoluteString) else { return true }
+        config.acBaseURL = url
+        services.store.saveACBaseURL(url)
+        services.chrome.setACBaseURL(url)
+        status.tokenMessage = nil
+        Log.event(.index, "config.acBaseURL")
+        detachIndex()
+        rebuildInterpreter()
+        await connectAC()
         statusChanged()
+        return true
+    }
+
+    /// The setup window closed or the user starts a new sign-in: the message of an earlier attempt no longer applies.
+    /// A Keychain error stays, it describes the token state itself.
+    public func dismissTokenMessage() {
+        guard status.tokenMessage != nil, status.token != .unreadable else { return }
+        status.tokenMessage = nil
+        statusChanged()
+    }
+
+    /// The user id for a token: its prefix ("538-…"), else `userId` from config.json (a token without the prefix). A
+    /// pinned id that differs from the token's belongs to another account or another AC address, so the token wins.
+    private func userId(hint: Int?) -> Int? {
+        if let hint, let pinned = config.userId, pinned != hint { Log.event(.index, "config.userId.ignored") }
+        return hint ?? config.userId
+    }
+
+    /// Drops the index and everything it fed into the flow (projects, task numbers, the menu counts). Results of
+    /// requests that still run for it no longer change the token status.
+    private func detachIndex() {
+        tokenGeneration += 1
+        index = nil
+        fastRefreshRunning = false
+        listsRefreshRunning = false
+        lastEntries = nil
+        lastInputs = nil
+        env.index = TaskIndex()
+        status.projects = 0
+        status.indexError = nil
+        status.lastRefresh = nil
     }
 
     /// A new token is in the Keychain: forget the client's token state (or attach the index), then refresh.
     private func tokenChanged(userIdHint: Int?) async {
         status.tokenMessage = nil
-        guard let uid = config.userId ?? userIdHint else {
+        guard let uid = userId(hint: userIdHint) else {
             setToken(.needsUserId)
             return
         }
@@ -961,7 +1045,7 @@ public final class Controller {
             try services.hotkey.register(config.hotkey) { [weak self] e in self?.hotkey(e) }
             status.hotkeyError = nil
         } catch {
-            status.hotkeyError = (error as? HotkeyError)?.message ?? HotkeyError.invalid.message
+            status.hotkeyError = ((error as? HotkeyError) ?? .invalid).message(language)
             Log.error(.hotkey, "hotkey.failed", error)
         }
     }
@@ -978,7 +1062,7 @@ public final class Controller {
     public func startDemo(loop: Bool = false) {
         // The menu disables the Diagnose commands while a command runs; this guards the URL scheme and races.
         guard flow.phase == .idle, !isDemoRunning else { return }
-        let d = OverlayDemo(overlay: services.overlay, clock: services.clock)
+        let d = OverlayDemo(overlay: services.overlay, clock: services.clock, language: language)
         demo = d
         d.start(loop: loop) { [weak self] in
             self?.demo = nil
@@ -999,8 +1083,9 @@ public final class Controller {
         status.selfCheckRunning = true
         statusChanged()
         let speech = services.speech
+        let language = language
         spawn { [weak self] in
-            let result = await speech.selfCheck()
+            let result = await speech.selfCheck(language: language)
             guard let self else { return }
             self.status.selfCheckRunning = false
             self.status.selfCheck = result
@@ -1015,24 +1100,25 @@ public final class Controller {
         guard flow.phase == .idle else { return }
         guard !status.chromeTestRunning else { return }
         status.chromeTestRunning = true
-        status.chromeTest = AppText.chromeTestRunning
+        status.chromeTest = appText.chromeTestRunning
         status.chromeFront = nil
         statusChanged()
         let chrome = services.chrome
         let url = flowConfig.myWorkURL
+        let text = appText
         spawn { [weak self] in
             var scripted = false
             let line: String
             do {
                 let result = try await chrome.open(url)
-                line = AppText.chromeTest(result)
+                line = text.chromeTest(result)
                 self?.noteOpen(result)
                 switch result {
                 case .reused, .newTab, .newWindow: scripted = true
                 default: break
                 }
             } catch {
-                line = AppText.chromeTestFailed
+                line = text.chromeTestFailed
             }
             guard let self else { return }
             self.status.chromeTestRunning = false
@@ -1042,7 +1128,7 @@ public final class Controller {
             // ChromeOpener checks the front-most app 0.3 s after the script.
             _ = self.services.clock.after(0.6) { [weak self] in
                 guard let self, let check = chrome.lastActivation else { return }
-                self.status.chromeFront = AppText.chromeFront(check.frontmost)
+                self.status.chromeFront = text.chromeFront(check.frontmost)
                 self.statusChanged()
             }
         }
@@ -1056,11 +1142,11 @@ public final class Controller {
             env.config = flowConfig
             services.store.saveLaunchAtLogin(enabled)
             refreshLoginStatus(notify: false)
-            status.loginMessage = loginStatus.hint
+            status.loginMessage = loginStatus.hint(language)
         } catch {
             Log.error(.login, "login.failed", error)
             refreshLoginStatus(notify: false)
-            status.loginMessage = [AppText.loginItemFailed, loginStatus.hint].compactMap { $0 }.joined(separator: ". ")
+            status.loginMessage = [appText.loginItemFailed, loginStatus.hint(language)].compactMap { $0 }.joined(separator: ". ")
         }
         statusChanged()
     }
@@ -1083,7 +1169,7 @@ public final class Controller {
 
     /// "Diagnose kopieren" finished: a check on the menu icon for a moment and a status line.
     public func diagnosticsCopied() {
-        notice(AppText.diagnosticsCopied)
+        notice(appText.diagnosticsCopied)
         iconFlash = "checkmark.circle"
         statusChanged()
         _ = services.clock.after(1.5) { [weak self] in
@@ -1115,9 +1201,10 @@ public final class Controller {
         return DiagnosticsInput(
             appVersion: appVersion, build: build, osVersion: osVersion, phase: flow.phase, status: status,
             microphone: services.permissions.microphone, speechRecognition: services.permissions.speechRecognition,
-            automation: automation, loginItem: services.loginItem.status, hotkey: config.hotkey.display,
+            automation: automation, loginItem: services.loginItem.status, hotkey: appText.hotkey(config.hotkey),
             ipcClients: services.ipc.connectedClients.count, index: snapshot?.stats, indexFetchedAt: snapshot?.fetchedAt,
-            taskListsFetchedAt: snapshot?.taskListsFetchedAt, latencies: latencies, config: config, now: services.clock.now)
+            taskListsFetchedAt: snapshot?.taskListsFetchedAt, latencies: latencies, config: config, now: services.clock.now,
+            language: language)
     }
 
     // MARK: - Tasks

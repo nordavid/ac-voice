@@ -35,14 +35,17 @@ public enum IPC {
         public var choices: [Choice]?
         public var total: Int?                  // candidates in total when more than shown
         public var deadline: Int64?             // epoch ms, choices window end
-        public var message: String?             // German status for success / error / hints
+        public var message: String?             // status for success / error / hints, in the app language
         public var micReady: Bool?
+        /// App language of the texts ("de", "en", `AppLanguage.rawValue`). Optional: older apps omit it, and the plugin
+        /// then falls back to the Stream Deck language.
+        public var lang: String?
         public init(seq: Int, phase: Phase, since: Int64, transcript: String? = nil, preview: String? = nil,
                     choices: [Choice]? = nil, total: Int? = nil, deadline: Int64? = nil, message: String? = nil,
-                    micReady: Bool? = nil) {
+                    micReady: Bool? = nil, lang: String? = nil) {
             self.seq = seq; self.phase = phase; self.since = since; self.transcript = transcript; self.preview = preview
             self.choices = choices; self.total = total; self.deadline = deadline; self.message = message
-            self.micReady = micReady
+            self.micReady = micReady; self.lang = lang
         }
     }
 

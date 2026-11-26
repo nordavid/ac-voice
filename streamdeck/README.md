@@ -13,7 +13,7 @@ One key, "AC Voice", that triggers the AC Voice app and mirrors its state. The a
 | keyDown | `press{id, at}` | idle/success/error: listen; listening: end the utterance now (or cancel before speech); choices/processing: cancel |
 | keyUp | `release{id, pressId, heldMs}` | `heldMs` >= 600 after speech ends the utterance (push-to-talk) |
 
-When the app is not running, keyDown tries the socket, then runs `open -g -b io.github.nordavid.acvoice` (LaunchServices, so the microphone and Automation permissions belong to AC Voice, not to Stream Deck). The press waits at most 3 s and goes out with its original id and time once the socket accepts; a release that happened meanwhile follows it. The app drops presses older than 3 s anyway (`FlowTimings.stalePress`). `open` exiting with an error status ("Unable to find application") shows "App fehlt"; an `open` that hangs past its 15 s timeout does not, because LaunchServices keeps starting the app.
+When the app is not running, keyDown tries the socket, then runs `open -g -b io.github.nordavid.acvoice` (LaunchServices, so the microphone and Automation permissions belong to AC Voice, not to Stream Deck). The press waits at most 3 s and goes out with its original id and time once the socket accepts; a release that happened meanwhile follows it. The app drops presses older than 3 s anyway (`FlowTimings.stalePress`). `open` exiting with an error status ("Unable to find application") shows "App missing" (German "App fehlt"); an `open` that hangs past its 15 s timeout does not, because LaunchServices keeps starting the app.
 
 Every press the app got also gets a release, because the app suspends its end-of-utterance detection while a key is down:
 - A key that disappears while held (page or profile switch; Stream Deck sends no keyUp then) sends `release` with `heldMs: 0`. The app resumes its automatic end of utterance instead of cutting the sentence.
@@ -31,8 +31,8 @@ Rendered as SVG data URLs (`setImage`), same colors as the overlay orb. `preview
 | Face | Look | Animated |
 |---|---|---|
 | offline | grey orb, "AC", caption "Start" (a press launches the app) | no |
-| missing | grey orb, red caption "App fehlt" (LaunchServices found no app) | no |
-| launching | grey orb with a cyan spinner, caption "Startet" | yes |
+| missing | grey orb, red caption "App missing" / "App fehlt" (LaunchServices found no app) | no |
+| launching | grey orb with a cyan spinner, caption "Starting" / "Startet" | yes |
 | idle | dim cyan orb with "AC" | no |
 | listening | cyan orb with ripples driven by the mic level; a breathing ring while the mic starts | yes |
 | processing | violet orb with a rotating arc | yes |
@@ -40,21 +40,25 @@ Rendered as SVG data URLs (`setImage`), same colors as the overlay orb. `preview
 | success | green ring and check | no |
 | error | red ring and cross, the app's message as a small caption | no |
 
+Captions follow the app language. Every `state` carries `lang` ("en", "de"), the idle state a client gets on connect included. Before the first snapshot, or with an app that does not send it, the key follows the Stream Deck language: German for German, English for every other language. The property inspector switches the same way. The manifest is English, and `de.json` localizes it for German Stream Decks.
+
 Animated faces repaint on a 100 ms tick only (at most 10 fps per key, about 1.4 KB per frame); face changes paint at once; identical frames are never sent twice. The key title is off (`UserTitleEnabled: false`).
 
 ## Layout
 
 ```
 src/protocol.ts      IPC v1 codec, mirrors Sources/ACVoiceCore/IPC.swift byte for byte
+src/config.ts        plugin identity, version, app bundle id, socket path, test hooks
 src/app-link.ts      socket client: queue, launch, reconnect, linger, waiting release, busy detection
 src/keys.ts          key edges -> press/release; a held key that disappears gets its release
 src/launcher.ts      `open -g -b` via execFile (ACVOICE_TEST_LAUNCHER replaces it in the e2e)
-src/view.ts          link events -> View (level smoothing, countdown start)
+src/view.ts          link events -> View (level smoothing, countdown start, language)
+src/i18n.ts          key captions per language, language codes
 src/render.ts        View -> SVG faces (pure)
 src/painter.ts       setImage policy (dedupe, 10 fps cap, tick only while animating)
 src/plugin.ts        Stream Deck SDK glue (the only file that talks to the SDK)
 src/icons.ts         static images; scripts/build-icons.ts renders them to PNG with resvg
-test/                vitest: protocol fixtures, render, view, painter, keys, app-link with a fake app on a temp socket
+test/                vitest: protocol fixtures, manifest, render, view, painter, keys, app-link with a fake app on a temp socket
 test/fixtures/ipc-v1.json   generated from the Swift codec (npm run fixtures)
 fake-host/host.mjs   headless e2e: fake Stream Deck host + fake app + launcher stub against the built plugin
 io.github.nordavid.acvoice.streamdeck.sdPlugin/   manifest, images, property inspector (ui/voice.html), bin/ (built)

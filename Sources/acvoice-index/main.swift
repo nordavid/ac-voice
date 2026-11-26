@@ -10,9 +10,10 @@ import Foundation
 //   acvoice-index [options] stats
 //   acvoice-index [options] regress <cases.tsv> [--no-company-aliases]
 //
-// Options: --cache PATH (default ~/Library/Caches/io.github.nordavid.acvoice/index.json), --ac-mcp DIR (token import,
-// default Config.acMcpPath or ~/ac-mcp), --config PATH (default the app's config.json, read only).
-// The token comes from the ac-mcp checkout (read only); this tool never touches the Keychain.
+// Options: --cache PATH (default ~/Library/Caches/io.github.nordavid.acvoice/index.json), --config PATH (default the
+// app's config.json, read only), --base-url URL (default acBaseURL from the config).
+// The token comes from the environment variable AC_TOKEN only; this tool never touches the Keychain and never prints
+// the token.
 //
 // refresh         fast refresh + all task lists (ETag) + missing archive pages; --full starts from an empty cache,
 //                 --fast stops after the fast refresh.
@@ -24,7 +25,7 @@ import Foundation
 
 func usage() -> Never {
     print("""
-    usage: acvoice-index [--cache PATH] [--ac-mcp DIR] [--config PATH] <command>
+    usage: AC_TOKEN=<token> acvoice-index [--cache PATH] [--config PATH] [--base-url URL] <command>
       refresh [--full] [--fast] [--stats]
       resolve "<utterance>" ["<hypothesis>" ...] [--active-project ID] [--url] [--refresh]
       probe <taskId>
@@ -50,13 +51,13 @@ func fail(_ message: String) -> Never {
 // MARK: - Arguments
 
 var args = Array(CommandLine.arguments.dropFirst())
-var cachePath: String?, acMcpPath: String?, configPath: String?
+var cachePath: String?, configPath: String?, baseURLArg: String?
 var rest: [String] = []
 while !args.isEmpty {
     let a = args.removeFirst()
     switch a {
     case "--cache": guard !args.isEmpty else { usage() }; cachePath = args.removeFirst()
-    case "--ac-mcp": guard !args.isEmpty else { usage() }; acMcpPath = args.removeFirst()
+    case "--base-url": guard !args.isEmpty else { usage() }; baseURLArg = args.removeFirst()
     case "--config": guard !args.isEmpty else { usage() }; configPath = args.removeFirst()
     case "-h", "--help": usage()
     default: rest.append(a)
@@ -81,16 +82,20 @@ do {
 
 // MARK: - Setup
 
-let config = configPath.map { Config.load(from: URL(fileURLWithPath: $0)) } ?? Config.load()
-let importDir = acMcpPath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath, isDirectory: true) }
-    ?? ACMCPTokenImporter.directory(for: config)
-let importer = ACMCPTokenImporter(directory: importDir)
-let imported: ACMCPTokenImporter.Imported
-do { imported = try importer.load() } catch { fail("no AC token in the ac-mcp checkout (.ac-token-cache or AC_TOKEN)") }
-// The token belongs to ac-mcp's instance, so its AC_URL wins over the config.
-let base = imported.baseURL ?? config.acBaseURL
-guard let userId = config.userId ?? imported.userId else { fail("unknown AC user id (config userId, AC_USER_ID or token prefix)") }
-let client = ACClient(base: base, userId: userId, tokens: importer)
+let config = configPath.map { Config.load(from: URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)) } ?? Config.load()
+let base: URL
+if let baseURLArg {
+    guard let url = Config.normalizedBaseURL(baseURLArg) else { fail("--base-url needs an https address with a host") }
+    base = url
+} else {
+    guard !config.hasPlaceholderBaseURL else { fail("no AC address: pass --base-url or set acBaseURL in config.json") }
+    base = config.acBaseURL
+}
+guard let rawToken = ProcessInfo.processInfo.environment["AC_TOKEN"], let token = ACToken.sanitize(rawToken) else {
+    fail("no AC token: set the environment variable AC_TOKEN")
+}
+guard let userId = config.userId ?? ACToken.userId(from: token) else { fail("unknown AC user id (config userId or token prefix)") }
+let client = ACClient(base: base, userId: userId, tokens: StaticTokenProvider(token))
 let cacheURL = cachePath.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) } ?? AppPaths.indexCache
 let store = IndexStore(client: client, cacheURL: cacheURL)
 let clock = ContinuousClock()

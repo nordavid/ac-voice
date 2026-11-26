@@ -19,20 +19,23 @@ struct SecondsLeftValue: ViewModifier {
     var deadline: Date?
     var frozen: Double?
     var live: Bool
+    var text: OverlayText = .de
 
     func body(content: Content) -> some View {
         if let deadline, live, frozen == nil {
             TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                content.accessibilityValue(Self.text(deadline.timeIntervalSince(ctx.date)))
+                content.accessibilityValue(Self.text(deadline.timeIntervalSince(ctx.date), text))
             }
         } else if let left = frozen ?? deadline.map({ $0.timeIntervalSinceNow }) {
-            content.accessibilityValue(Self.text(left))
+            content.accessibilityValue(Self.text(left, text))
         } else {
             content
         }
     }
 
-    nonisolated static func text(_ seconds: Double) -> String { OverlayText.a11ySecondsLeft(max(0, Int(seconds.rounded(.up)))) }
+    nonisolated static func text(_ seconds: Double, _ text: OverlayText = .de) -> String {
+        text.a11ySecondsLeft(max(0, Int(seconds.rounded(.up))))
+    }
 }
 
 /// The "Jarvis" orb: a lit sphere with concentric rings, drawn with `Canvas`.

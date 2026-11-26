@@ -214,20 +214,27 @@ import ACVoiceCore
 
 @Suite struct TextStyleTests {
     @Test func germanStringsFollowTheStyleRules() {
-        for s in FlowText.all {
+        for s in FlowText.de.all {
             #expect(!s.contains("–") && !s.contains("—"), "\(s)")
             let lower = s.lowercased()
             for word in ["könnte", "sollte", "würde", "wäre"] { #expect(!lower.contains(word), "\(s)") }
             // The automation hints run over two overlay lines (success card, 14 pt); everything else fits one.
-            let limit = s == FlowText.automationHint || s == FlowText.automationSetupHint ? 90 : 60
+            let limit = s == FlowText.de.automationHint || s == FlowText.de.automationSetupHint ? 90 : 60
             #expect(!s.isEmpty && s.count <= limit, "\(s)")
         }
     }
 
+    /// A rejected token names its next step under the error card, as an offline AC does.
+    @Test func errorHints() {
+        #expect(FlowText.de.hint(forError: FlowText.de.tokenRejected) == FlowText.de.signInAgain)
+        #expect(FlowText.de.hint(forError: FlowText.de.acUnreachable) == FlowText.de.checkNetwork)
+        #expect(FlowText.de.hint(forError: FlowText.de.ticketNotFound(412)) == nil)
+    }
+
     @Test func failureTexts() {
-        #expect(FlowText.failure(.micDenied) == "Erlaube das Mikrofon in der Einrichtung")
-        #expect(FlowText.failure(.noInput) == "Mikrofon fehlt")
-        #expect(FlowText.failure(.modelUnavailable) == "Sprachmodell fehlt")
-        #expect(FlowText.failure(.engine) == "Die Spracherkennung meldet einen Fehler")
+        #expect(FlowText.de.failure(.micDenied) == "Erlaube das Mikrofon in der Einrichtung")
+        #expect(FlowText.de.failure(.noInput) == "Mikrofon fehlt")
+        #expect(FlowText.de.failure(.modelUnavailable) == "Sprachmodell fehlt")
+        #expect(FlowText.de.failure(.engine) == "Die Spracherkennung meldet einen Fehler")
     }
 }

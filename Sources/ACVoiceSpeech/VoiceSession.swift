@@ -7,7 +7,7 @@ import Speech
 /// Tap to talk with automatic end of utterance and follow-up answers in the same session (PLAN 2.3).
 ///
 /// Audio source chunks -> AVAudioConverter (16 kHz Int16 mono) -> RMS per 20 ms slice -> `EndpointGate` ->
-/// one SpeechAnalyzer with SpeechTranscriber + DictationTranscriber (de_DE). At the end of an utterance a
+/// one SpeechAnalyzer with SpeechTranscriber + DictationTranscriber (`locale`: de_DE or en_US). At the end of an utterance a
 /// 500 ms synthetic noise-floor tail is appended and `finalize(through: speechEnd + 0.4 s)` runs under
 /// `finalizeOrKill`; a killed analyzer is replaced by a fresh analyzer and input stream (REVIEW M2).
 ///
@@ -32,6 +32,9 @@ public final class VoiceSession: @unchecked Sendable {
         public var finalizeTimeout = 1.2
         /// Wait after `finalize` for the result streams to deliver.
         public var drainTimeout = 0.15
+        /// A transcriber that finalized past the speech end but not through the finalize point is done once no
+        /// result arrived for this long (`Epoch.drained`). Results come within about 5 ms of `finalize` returning.
+        public var drainSettle = 0.03
         public var maxAlternatives = 3
         /// Deadline for installing the speech assets in `warmUp`. A first download can take long; it goes on in
         /// the background after the deadline and `warmUp` throws `SpeechError.assetsUnavailable`.
@@ -118,6 +121,8 @@ public final class VoiceSession: @unchecked Sendable {
     }
 
     public let locale: Locale
+    /// Language of the voice commands, from `locale`: the dangling-word rule of the gate and of a reopen.
+    public let language: AppLanguage
     private let lock = NSLock()
     private var _tuning: Tuning
     private var current: Run?
@@ -132,6 +137,7 @@ public final class VoiceSession: @unchecked Sendable {
     public init(tuning: Tuning = .init(), locale: Locale = Locale(identifier: "de_DE")) {
         _tuning = tuning
         self.locale = locale
+        language = AppLanguage(locale: locale)
     }
 
     /// Applies from the next `start`.
@@ -189,7 +195,7 @@ public final class VoiceSession: @unchecked Sendable {
                 let pre = prebuild
                 prebuild = nil
                 let run = Run(id: gen?.session ?? sessionCounter, utterance: gen?.utterance ?? 1, source: source,
-                              format: format, tuning: _tuning, locale: locale, events: continuation, context: context,
+                              format: format, tuning: _tuning, locale: locale, language: language, events: continuation, context: context,
                               commandContext: commandContext, mode: mode, hangover: hangover,
                               killFirstFinalize: killNextFinalize)
                 killNextFinalize = false
@@ -373,6 +379,8 @@ final class Epoch: @unchecked Sendable {
     private var st = ModuleResults()
     private var _analyzer: Task<PreparedAnalyzer?, Never>?
     private var _resultTasks: [Task<Void, Never>] = []
+    /// Uptime of the latest result of either module.
+    private var lastResult = -Double.infinity
 
     init(id: Int) {
         self.id = id
@@ -391,6 +399,7 @@ final class Epoch: @unchecked Sendable {
 
     func record(_ m: Module, _ s: Segment, isFinal: Bool, finalizedThrough: Int64) {
         lock.withLock {
+            lastResult = uptime()
             switch m {
             case .dt: dt.record(s, isFinal: isFinal, finalizedThrough: finalizedThrough)
             case .st: st.record(s, isFinal: isFinal, finalizedThrough: finalizedThrough)
@@ -406,6 +415,24 @@ final class Epoch: @unchecked Sendable {
 
     func finalized(through frame: Int64) -> Bool {
         lock.withLock { dt.finalizedThrough >= frame && st.finalizedThrough >= frame }
+    }
+
+    /// Whether the results of a finalize through `frame` are in: both modules reported finalization through `frame`,
+    /// or a module that stopped short of it has nothing left to send. SpeechTranscriber can end its last final about
+    /// 0.35 s after the last word and send nothing for the silence after it, so its finalization time stays below
+    /// `speechEnd + finalizeLead` (English "Never mind" waited the whole drain timeout in every run). Such a module
+    /// has finalized past `speechEnd` (frame of the last voiced slice), holds no volatile text before `frame`, and no
+    /// result of either module arrived for `settle` seconds since `start`. A module still behind `speechEnd` waits
+    /// for its final: it often arrives a few ms after `finalize` returned.
+    func drained(through frame: Int64, speechEnd: Int64, since start: Double, settle: Double, now: Double) -> Bool {
+        lock.withLock {
+            let short = [dt, st].filter { $0.finalizedThrough < frame }
+            if short.isEmpty { return true }
+            guard now - max(start, lastResult) >= settle - 1e-9 else { return false }
+            return short.allSatisfy { m in
+                m.finalizedThrough >= speechEnd && (m.volatile.map { $0.best.isEmpty || $0.start >= frame } ?? true)
+            }
+        }
     }
 }
 
@@ -427,6 +454,8 @@ final class Run: @unchecked Sendable {
         var hangover: Double
         var kill: Bool
         var reopens: Int
+        /// Analyzer frame of the last voiced slice: the speech end on the epoch's timeline.
+        var voicedThrough: Int64 = 0
     }
 
     let id: Int
@@ -435,6 +464,7 @@ final class Run: @unchecked Sendable {
     let rate: Double
     let tuning: VoiceSession.Tuning
     let locale: Locale
+    let language: AppLanguage
     let events: AsyncStream<VoiceSession.Event>.Continuation
     let startWall = uptime()
     static let debug = ProcessInfo.processInfo.environment["ACVOICE_SPEECH_DEBUG"] == "1"
@@ -471,7 +501,8 @@ final class Run: @unchecked Sendable {
     private let startHangover: Double?
 
     init(id: Int, utterance: Int = 1, source: any AudioSource, format: AVAudioFormat, tuning: VoiceSession.Tuning,
-         locale: Locale, events: AsyncStream<VoiceSession.Event>.Continuation, context: [String], commandContext: [String],
+         locale: Locale, language: AppLanguage = .de, events: AsyncStream<VoiceSession.Event>.Continuation, context: [String],
+         commandContext: [String],
          mode: UtteranceMode, hangover: Double? = nil, killFirstFinalize: Bool) {
         self.id = id
         self.utterance = utterance
@@ -481,12 +512,13 @@ final class Run: @unchecked Sendable {
         rate = format.sampleRate
         self.tuning = tuning
         self.locale = locale
+        self.language = language
         self.events = events
         self.context = context
         self.commandContext = commandContext
         self.mode = mode
         killNext = killFirstFinalize
-        gate = EndpointGate(config: tuning.gate)
+        gate = EndpointGate(config: tuning.gate, language: language)
         epoch = Epoch(id: 1)
         converter = StreamConverter(output: format)
         meter = SliceMeter(sliceFrames: Int((tuning.gate.sliceDuration * format.sampleRate).rounded()))
@@ -690,7 +722,7 @@ final class Run: @unchecked Sendable {
         let job = FinalizeJob(epoch: epoch, utterance: utterance, mode: mode, from: uttStartFrame, through: through,
                               reason: ending.reason, speechStart: gate.speechStart, speechEnd: ending.lastVoiced,
                               lastVoicedWall: lastVoicedWall, decidedWall: decidedWall, hangover: gate.effectiveHangover,
-                              kill: killNext, reopens: reopens)
+                              kill: killNext, reopens: reopens, voicedThrough: lastVoicedFrame)
         killNext = false
         lastThrough = through
         log(String(format: "end %@ utterance %d: speechEnd %.2f s, decided after %.0f ms", ending.reason.rawValue,
@@ -714,9 +746,13 @@ final class Run: @unchecked Sendable {
             killed = !ok
             if ok {
                 let d0 = uptime(), deadline = d0 + tuning.drainTimeout
-                while !job.epoch.finalized(through: job.through), uptime() < deadline { try? await Task.sleep(for: .milliseconds(3)) }
-                log(String(format: "finalize %.0f ms, drain %.0f ms%@", (d0 - f0) * 1000, (uptime() - d0) * 1000,
-                           job.epoch.finalized(through: job.through) ? "" : " (timeout)"))
+                let drained = { [tuning] in
+                    job.epoch.drained(through: job.through, speechEnd: job.voicedThrough, since: d0, settle: tuning.drainSettle,
+                                      now: uptime())
+                }
+                while !drained(), uptime() < deadline { try? await Task.sleep(for: .milliseconds(3)) }
+                let state = job.epoch.finalized(through: job.through) ? "" : drained() ? " (settled)" : " (timeout)"
+                log(String(format: "finalize %.0f ms, drain %.0f ms%@", (d0 - f0) * 1000, (uptime() - d0) * 1000, state))
             }
         }
         let f1 = uptime()
@@ -724,7 +760,7 @@ final class Run: @unchecked Sendable {
         let dt = job.epoch.transcript(.dt, from: job.from, through: job.through, tolerance: tol, includeVolatile: false)
         let st = job.epoch.transcript(.st, from: job.from, through: job.through, tolerance: tol, includeVolatile: false)
         let lead = EndpointGate.leading(dt.best, st.best)
-        if Self.shouldReopen(after: job, killed: killed, finalText: lead, config: tuning.gate) {
+        if Self.shouldReopen(after: job, killed: killed, finalText: lead, config: tuning.gate, language: language) {
             // The final text shows a dangling last word the live partial did not have yet ("Öffne WWT Ticket"
             // during a pause before "412"): keep listening with the incomplete hangover (REVIEW M1).
             let resumed = lock.withLock { () -> VoiceSession.Event? in
@@ -777,10 +813,11 @@ final class Run: @unchecked Sendable {
     /// controller's (`Parser.looksIncomplete`; a trailing numeral dangles in commands only). Not when the gate already
     /// waited the incomplete hangover: the end came at most half a chunk early, so reopening only adds a chunk, a
     /// second synthetic tail and a second finalize (review: every "Ticket 47285" reopened once).
-    static func shouldReopen(after job: FinalizeJob, killed: Bool, finalText: String, config: EndpointGate.Config) -> Bool {
+    static func shouldReopen(after job: FinalizeJob, killed: Bool, finalText: String, config: EndpointGate.Config,
+                             language: AppLanguage = .de) -> Bool {
         guard !killed, job.reason == .pause, job.reopens < 2, job.hangover < config.incompleteHangover - 1e-9 else { return false }
-        guard !TextNorm.tokenize(finalText).isEmpty else { return false }
-        return Parser.looksIncomplete(finalText, choosing: job.mode == .answer)
+        guard !TextNorm.tokenize(finalText, language: language).isEmpty else { return false }
+        return Parser.looksIncomplete(finalText, choosing: job.mode == .answer, language: language)
     }
 
     /// A command utterance that ended on a pause without a word: no hypotheses at all, or a short one where DT

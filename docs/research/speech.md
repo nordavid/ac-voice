@@ -260,4 +260,4 @@ try? await analyzer.finalize(through: CMTime(value: through, timescale: CMTimeSc
 - `spikes/speech/src/clm.swift`, `.../src/probe.swift`, `.../src/probe2.swift`, `.../src/install.swift`
 - Raw results: `spikes/speech/out/` (st.txt, st_ctx.txt, dt.txt, dt_ctx.txt, st_t700.txt, dtctx_t700.txt, both_*.txt, dt_vocab*.txt, dt_ctx_clm*.txt).
 - Test audio: `spikes/speech/audio/` (anna_/eddy_/flo_p01-p15.aiff, mix_*.wav, phrases.txt)
-- Nothing in ac-mcp or any other local project was modified (`git status` in ac-mcp is clean). The AC API was only read once via the read-only `list_projects` tool of ac-mcp to size the vocabulary. No mic, Chrome or app was touched, and no permission prompt was triggered.
+- No other local project was modified. The AC API was only read once, through a read-only project list of a local MCP server, to size the vocabulary. No mic, Chrome or app was touched, and no permission prompt was triggered.

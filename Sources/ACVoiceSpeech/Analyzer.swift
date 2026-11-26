@@ -36,7 +36,8 @@ enum AnalyzerFactory {
         return context
     }
 
-    /// Installs or subscribes the de_DE assets. About 0.7 s when they are on disk already (research 3).
+    /// Installs or subscribes the assets of `locale` (de_DE or en_US, the same way for both). About 0.7 s when they
+    /// are on disk already (research 3).
     static func installAssets(_ locale: Locale) async throws {
         let modules: [any SpeechModule] = [makeST(locale), makeDT(locale)]
         if let request = try await AssetInventory.assetInstallationRequest(supporting: modules) {

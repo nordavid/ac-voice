@@ -6,12 +6,13 @@ import Foundation
 //   acvoice-resolve <projects.tsv|projects.json> "<utterance>" ["<second hypothesis>" ...]
 //   acvoice-resolve <projects.tsv|projects.json> --cases <regression.tsv>
 //
-// Options: --alias CODE=spoken[|spoken]  (repeatable), --favorite <id> (repeatable, adds a strong personal signal).
+// Options: --alias CODE=spoken[|spoken]  (repeatable), --favorite <id> (repeatable, adds a strong personal signal),
+// --lang de|en (language of the utterances, default de; in a case file until its first `@language` line).
 // projects.tsv holds "id<TAB>name" lines; projects.json is the ProjectCatalog format of Tests/Fixtures.
 // The regression format is documented in ACVoiceCore/Regression.swift.
 
 func usage() -> Never {
-    print("usage: acvoice-resolve <projects.tsv|projects.json> [--alias CODE=a|b] [--favorite ID] (--cases FILE | utterance [hypothesis ...])")
+    print("usage: acvoice-resolve <projects.tsv|projects.json> [--alias CODE=a|b] [--favorite ID] [--lang de|en] (--cases FILE | utterance [hypothesis ...])")
     exit(2)
 }
 
@@ -22,6 +23,7 @@ var aliases: [String: [String]] = [:]
 var favorites: [Int] = []
 var casesPath: String?
 var hyps: [String] = []
+var language = AppLanguage.de
 while !args.isEmpty {
     let a = args.removeFirst()
     switch a {
@@ -36,6 +38,9 @@ while !args.isEmpty {
     case "--cases":
         guard !args.isEmpty else { usage() }
         casesPath = args.removeFirst()
+    case "--lang":
+        guard let l = args.first.flatMap(AppLanguage.init(rawValue:)) else { usage() }
+        args.removeFirst(); language = l
     default: hyps.append(a)
     }
 }
@@ -55,7 +60,7 @@ for i in projects.indices where favorites.contains(projects[i].id) {
 
 if let casesPath {
     guard let text = try? String(contentsOfFile: casesPath, encoding: .utf8) else { print("cannot read \(casesPath)"); exit(1) }
-    let results = Regression.run(Regression.parse(text, now: now), projects: projects, now: now)
+    let results = Regression.run(Regression.parse(text, now: now, language: language), projects: projects, now: now)
     for r in results {
         let mark = r.passed ? "ok  " : "FAIL"
         print("\(mark) line \(r.testCase.line): \(r.actual)" + (r.passed ? "" : "  (expected \(r.testCase.expected))")
@@ -69,7 +74,7 @@ if let casesPath {
 }
 
 guard !hyps.isEmpty else { usage() }
-let interp = Interpreter(resolver: Resolver(projects: projects))
+let interp = Interpreter(resolver: Resolver(projects: projects), language: language)
 let t0 = DispatchTime.now().uptimeNanoseconds
 let result = interp.command(hyps.map { Hypothesis($0) }, now: now)
 let us = Double(DispatchTime.now().uptimeNanoseconds - t0) / 1000

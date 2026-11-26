@@ -345,6 +345,27 @@
       "line" : "{\"v\":1,\"t\":\"state\",\"seq\":2,\"phase\":\"listening\",\"since\":5,\"micReady\":true,\"future\":{\"x\":[1,2]}}"
     },
     {
+      "expect" : {
+        "lang" : "en",
+        "phase" : "idle",
+        "seq" : 3,
+        "since" : 5,
+        "t" : "state",
+        "v" : 1
+      },
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":3,\"phase\":\"idle\",\"since\":5,\"lang\":\"en\"}"
+    },
+    {
+      "expect" : {
+        "phase" : "idle",
+        "seq" : 3,
+        "since" : 5,
+        "t" : "state",
+        "v" : 1
+      },
+      "line" : "{\"v\":1,\"t\":\"state\",\"seq\":3,\"phase\":\"idle\",\"since\":5,\"lang\":null}"
+    },
+    {
       "expect" : null,
       "line" : "{\"v\":1,\"t\":\"state\",\"seq\":2,\"phase\":\"thinking\",\"since\":5}"
     },
@@ -477,8 +498,9 @@
       }
     },
     {
-      "line" : "{\"message\":\"WWT: Website Relaunch\",\"phase\":\"success\",\"preview\":\"WWT: Website Relaunch\",\"seq\":7,\"since\":1732440002000,\"t\":\"state\",\"transcript\":\"WWT Relaunch\",\"v\":1}",
+      "line" : "{\"lang\":\"de\",\"message\":\"WWT: Website Relaunch\",\"phase\":\"success\",\"preview\":\"WWT: Website Relaunch\",\"seq\":7,\"since\":1732440002000,\"t\":\"state\",\"transcript\":\"WWT Relaunch\",\"v\":1}",
       "state" : {
+        "lang" : "de",
         "message" : "WWT: Website Relaunch",
         "phase" : "success",
         "preview" : "WWT: Website Relaunch",
@@ -496,6 +518,30 @@
         "phase" : "error",
         "seq" : 8,
         "since" : 1732440003000,
+        "t" : "state",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"lang\":\"en\",\"message\":\"I can’t hear anything\",\"phase\":\"error\",\"seq\":10,\"since\":1732440004000,\"t\":\"state\",\"transcript\":\"my tasks\",\"v\":1}",
+      "state" : {
+        "lang" : "en",
+        "message" : "I can’t hear anything",
+        "phase" : "error",
+        "seq" : 10,
+        "since" : 1732440004000,
+        "t" : "state",
+        "transcript" : "my tasks",
+        "v" : 1
+      }
+    },
+    {
+      "line" : "{\"lang\":\"en\",\"phase\":\"idle\",\"seq\":11,\"since\":1732440005000,\"t\":\"state\",\"v\":1}",
+      "state" : {
+        "lang" : "en",
+        "phase" : "idle",
+        "seq" : 11,
+        "since" : 1732440005000,
         "t" : "state",
         "v" : 1
       }

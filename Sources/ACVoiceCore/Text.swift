@@ -14,10 +14,16 @@ public struct Token: Sendable, Hashable, CustomStringConvertible {
 
 public enum TextNorm {
     /// Rewrites digits and punctuation before tokenizing. Keeps case for acronym detection.
-    static func clean(_ raw: String) -> String {
+    static func clean(_ raw: String, language: AppLanguage = .de) -> String {
         var t = raw.replacingOccurrences(of: "ß", with: "ss")
-        // German thousands groups from STT: "47.285", "47. 285", "47 285" -> "47285".
-        t = t.replacingOccurrences(of: #"\b(\d{1,3})(?:\.\s?|\s)(\d{3})\b"#, with: "$1$2", options: .regularExpression)
+        if language == .en {
+            // "WWT's" -> "WWT"; "what's", "I'll" -> "whats", "Ill": a split "s" or "ll" would read as a spelled letter.
+            t = t.replacingOccurrences(of: #"(\p{Lu}{2,})['’]s\b"#, with: "$1", options: .regularExpression)
+            t = t.replacingOccurrences(of: #"(\p{L})['’](\p{L})"#, with: "$1$2", options: .regularExpression)
+        }
+        // Thousands groups from STT: "47.285", "47. 285", "47 285" (English also "47,285") -> "47285".
+        let groups = language == .de ? #"\b(\d{1,3})(?:\.\s?|\s)(\d{3})\b"# : #"\b(\d{1,3})(?:[.,]\s?|\s)(\d{3})\b"#
+        t = t.replacingOccurrences(of: groups, with: "$1$2", options: .regularExpression)
         t = t.replacingOccurrences(of: #"[-_/–—]"#, with: " ", options: .regularExpression)
         // STT glues acronyms to the next word: "WWTilonch" -> "WWT ilonch".
         t = t.replacingOccurrences(of: #"\b(\p{Lu}{2,})(\p{Ll}{3,})"#, with: "$1 $2", options: .regularExpression)
@@ -27,26 +33,75 @@ public enum TextNorm {
         return t
     }
 
-    public static func fold(_ s: String) -> String {
-        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE")).lowercased()
+    /// Case- and diacritic-insensitive lowercase form, folded with the German locale (project names, German speech).
+    public static func fold(_ s: String) -> String { fold(s, language: .de) }
+
+    /// `fold` for speech in `language`: German folds with the German locale, English with no locale.
+    public static func fold(_ s: String, language: AppLanguage) -> String {
+        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: language == .de ? germanLocale : nil).lowercased()
     }
 
-    /// Full pipeline: clean, split, fold, detect acronyms, collapse spelled letters.
-    public static func tokenize(_ raw: String) -> [Token] {
-        let words = clean(raw).split(separator: " ").map(String.init)
+    private static let germanLocale = Locale(identifier: "de_DE")
+
+    /// Full pipeline: clean, split, fold, detect acronyms, collapse spelled letters (letter names of `language`).
+    /// Project names always use German rules (the default): they are AC names, not speech.
+    public static func tokenize(_ raw: String, language: AppLanguage = .de) -> [Token] {
+        let words = clean(raw, language: language).split(separator: " ").map(String.init)
         let tokens = words.map { w -> Token in
             let letters = w.filter(\.isLetter)
             let acronym = letters.count >= 2 && letters.allSatisfy(\.isUppercase)
             // "S&K" and "S+K" are the same code.
-            return Token(text: fold(w.count > 1 ? w.replacingOccurrences(of: "&", with: "+") : w), isAcronym: acronym)
+            return Token(text: fold(w.count > 1 ? w.replacingOccurrences(of: "&", with: "+") : w, language: language),
+                         isAcronym: acronym)
         }
-        return collapseSpelling(tokens)
+        return collapseSpelling(tokens, language: language)
     }
 
     /// Stable key of a filler-free query: token keys joined by one space ("eben betreuung").
     /// Used for learned picks in `History` and as the alias text in `History.learnedAliases`.
     public static func queryKey(_ tokens: [Token]) -> String {
         tokens.map(\.key).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
+    /// Letter names, weak letters and joiners of one language.
+    struct Spelling: Sendable {
+        /// Letter names as spoken. Values are the letter.
+        let names: [String: String]
+        /// Letter names that are also everyday words. They only count inside a run with strong letters, and never next
+        /// to an acronym.
+        let weak: Set<String>
+        let joiners: Set<String>
+        /// Multi-character strong letter names, longest first, for splitting glued spellings ("wewete"). Empty: no
+        /// glued spellings.
+        let glued: [String]
+
+        init(names: [String: String], weak: Set<String>, joiners: Set<String>, gluedSpellings: Bool) {
+            self.names = names; self.weak = weak; self.joiners = joiners
+            glued = gluedSpellings ? names.keys.filter { $0.count >= 2 && !weak.contains($0) }
+                .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 } : []
+        }
+
+        static func of(_ language: AppLanguage) -> Spelling { language == .de ? german : english }
+
+        /// German letter names. "Geh WWT Relaunch" is the verb and WWT, not "GWWT".
+        static let german = Spelling(names: TextNorm.letterNames, weak: TextNorm.weakLetters, joiners: TextNorm.joiners,
+                                     gluedSpellings: true)
+
+        /// English letter names ("double-u double-u tee", "es and kay", "eye bee en"). The weak ones are common English
+        /// words ("a", "I", "be", "see", "you", "are", "why", "oh"): "can you see WWT" stays words and WWT.
+        /// W is "double u" (two words), merged before the run (`mergeDoubles`).
+        static let english = Spelling(
+            names: [
+                "a": "a", "ay": "a", "bee": "b", "be": "b", "see": "c", "sea": "c", "cee": "c", "dee": "d", "e": "e",
+                "ee": "e", "ef": "f", "eff": "f", "gee": "g", "aitch": "h", "haitch": "h", "i": "i", "eye": "i",
+                "aye": "i", "jay": "j", "kay": "k", "el": "l", "ell": "l", "em": "m", "emm": "m", "en": "n", "enn": "n",
+                "o": "o", "oh": "o", "owe": "o", "pee": "p", "pea": "p", "cue": "q", "queue": "q", "kyu": "q", "ar": "r",
+                "are": "r", "arr": "r", "es": "s", "ess": "s", "tee": "t", "tea": "t", "u": "u", "you": "u", "yu": "u",
+                "vee": "v", "ex": "x", "ecks": "x", "why": "y", "wye": "y", "zee": "z", "zed": "z",
+            ],
+            weak: ["a", "e", "i", "o", "u", "be", "see", "sea", "you", "are", "why", "oh", "owe", "aye", "ay"],
+            joiners: ["and", "plus", "&", "+"],
+            gluedSpellings: false)
     }
 
     /// German letter names as spoken. Values are the letter.
@@ -63,13 +118,11 @@ public enum TextNorm {
     static let weakLetters: Set<String> = ["a", "e", "i", "o", "u", "de", "er", "es", "en", "em", "el", "eh", "oh", "ah", "geh"]
     static let joiners: Set<String> = ["und", "plus", "&", "+"]
     /// Multi-character strong letter names, longest first, for splitting glued spellings ("wewete").
-    static let gluedNames: [String] = letterNames.keys
-        .filter { $0.count >= 2 && !weakLetters.contains($0) }
-        .sorted { $0.count != $1.count ? $0.count > $1.count : $0 < $1 }
+    static let gluedNames: [String] = Spelling.german.glued
 
-    static func letter(_ t: Token) -> String? {
+    static func letter(_ t: Token, _ sp: Spelling = .german) -> String? {
         if t.text.count == 1, t.text.first!.isLetter { return t.text }
-        return letterNames[t.text]
+        return sp.names[t.text]
     }
 
     /// "WW" in "WW T": a short all-caps token that joins a run of single spelled letters.
@@ -79,16 +132,16 @@ public enum TextNorm {
     }
 
     /// "wewete" -> "wwt": a single word made of at least 3 strong letter names and nothing else.
-    static func gluedSpelling(_ word: String) -> String? {
-        guard word.count >= 5, word.allSatisfy(\.isLetter) else { return nil }
+    static func gluedSpelling(_ word: String, _ sp: Spelling = .german) -> String? {
+        guard !sp.glued.isEmpty, word.count >= 5, word.allSatisfy(\.isLetter) else { return nil }
         let chars = Array(word)
         // Memoized DFS over positions; the first full segmentation with >= 3 names wins.
         var failed = Set<Int>()
         func walk(_ at: Int) -> [String]? {
             if at == chars.count { return [] }
             if failed.contains(at) { return nil }
-            for name in gluedNames where at + name.count <= chars.count && String(chars[at..<(at + name.count)]) == name {
-                if let rest = walk(at + name.count) { return [letterNames[name]!] + rest }
+            for name in sp.glued where at + name.count <= chars.count && String(chars[at..<(at + name.count)]) == name {
+                if let rest = walk(at + name.count) { return [sp.names[name]!] + rest }
             }
             failed.insert(at)
             return nil
@@ -97,36 +150,57 @@ public enum TextNorm {
         return letters.joined()
     }
 
+    /// English: "double u" / "double you" is one letter name (W), "double t" two letters ("tt"). The merged token is
+    /// the bare letter, so the run rules treat it as a strong letter.
+    static func mergeDoubles(_ tokens: [Token]) -> [Token] {
+        var out: [Token] = [], i = 0
+        while i < tokens.count {
+            if tokens[i].text == "double", i + 1 < tokens.count {
+                let next = tokens[i + 1].text
+                if ["u", "you", "yu", "yoo", "ewe"].contains(next) { out.append(Token(text: "w")); i += 2; continue }
+                if next.count == 1, next.first!.isLetter {
+                    out.append(Token(text: next)); out.append(Token(text: next)); i += 2; continue
+                }
+            }
+            out.append(tokens[i]); i += 1
+        }
+        return out
+    }
+
     /// "we we te" -> WWT, "w w t" -> WWT, "WW T" -> WWT, "Wewete" -> WWT,
-    /// "s und k" / "es und ka" / "k & t" -> S+K.
-    static func collapseSpelling(_ tokens: [Token]) -> [Token] {
+    /// "s und k" / "es und ka" / "k & t" -> S+K. English: "double u double u tee" -> WWT, "es and kay" -> S+K.
+    static func collapseSpelling(_ input: [Token], language: AppLanguage = .de) -> [Token] {
+        let sp = Spelling.of(language)
+        let tokens = language == .en ? mergeDoubles(input) : input
         var out: [Token] = []
         var i = 0
         while i < tokens.count {
-            if i + 2 < tokens.count, let a = letter(tokens[i]), joiners.contains(tokens[i + 1].text),
-               let b = letter(tokens[i + 2]),
-               !(weakLetters.contains(tokens[i].text) && weakLetters.contains(tokens[i + 2].text)) {
+            if i + 2 < tokens.count, let a = letter(tokens[i], sp), sp.joiners.contains(tokens[i + 1].text),
+               let b = letter(tokens[i + 2], sp),
+               !(sp.weak.contains(tokens[i].text) && sp.weak.contains(tokens[i + 2].text)) {
                 out.append(Token(text: "\(a)+\(b)", isAcronym: true)); i += 3; continue
             }
             // A run of spelled letters, optionally with short acronyms next to single letters ("WW T").
             var j = i, letters = "", strong = 0, units = 0, weakSingles = 0, acronyms = 0
             while j < tokens.count {
-                if let l = letter(tokens[j]) {
+                if let l = letter(tokens[j], sp) {
                     letters += l; units += 1
-                    if weakLetters.contains(tokens[j].text) { weakSingles += 1 } else { strong += 1 }
+                    if sp.weak.contains(tokens[j].text) { weakSingles += 1 } else { strong += 1 }
                 } else if let s = shortAcronym(tokens[j]), letters.count + s.count <= 4,
-                          j > i || (j + 1 < tokens.count && letter(tokens[j + 1]) != nil) {
+                          j > i || (j + 1 < tokens.count && letter(tokens[j + 1], sp) != nil) {
                     // Codes have 2-4 letters: "WW T" joins, "Q Z CRM" stays "QZ" + "CRM".
                     letters += s; units += 1; strong += 1; acronyms += 1
                 } else { break }
                 j += 1
             }
             // With an acronym in the run, every single letter must be a strong letter name ("WW T", not "IT e").
-            let spelled = acronyms > 0 ? (units > acronyms && weakSingles == 0) : (units >= 2 && strong * 2 >= units)
+            // English: two letter names need two strong ones ("a bee" is a phrase, "cue zee" is QZ).
+            let enough = language == .en && units == 2 ? strong == 2 : strong * 2 >= units
+            let spelled = acronyms > 0 ? (units > acronyms && weakSingles == 0) : (units >= 2 && enough)
             if spelled {
                 out.append(Token(text: letters, isAcronym: true)); i = j; continue
             }
-            if !tokens[i].isAcronym, let glued = gluedSpelling(tokens[i].text) {
+            if !tokens[i].isAcronym, let glued = gluedSpelling(tokens[i].text, sp) {
                 out.append(Token(text: glued, isAcronym: true)); i += 1; continue
             }
             out.append(tokens[i]); i += 1
@@ -250,6 +324,63 @@ public enum GermanNumbers {
     }
 }
 
+/// English cardinal and ordinal words. A spoken run ("four twelve", "four hundred and twelve", "forty seven thousand
+/// two hundred eighty five") composes with `GermanNumbers.compose`: the place-value rules are the same.
+public enum EnglishNumbers {
+    static let units: [String: Int] = [
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    ]
+    static let tens: [String: Int] = [
+        "twenty": 20, "thirty": 30, "forty": 40, "fourty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+        "ninety": 90,
+    ]
+    static let words: [String: Int] = units.merging(tens) { a, _ in a }.merging([
+        "zero": 0, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+        "seventeen": 17, "eighteen": 18, "nineteen": 19, "hundred": 100, "thousand": 1000,
+    ]) { a, _ in a }
+
+    /// "412", "twelve", "hundred", "fortyseven" (a tens word glued to a units word). Digit strings return their value
+    /// (nil beyond `Int.max`); "a", "and", "oh" return nil (`Parser` reads them inside a run).
+    public static func cardinal(_ token: String) -> Int? {
+        if let n = Int(token) { return n }
+        if let v = words[token] { return v }
+        for (t, tv) in tens where token.count > t.count && token.hasPrefix(t) {
+            if let u = units[String(token.dropFirst(t.count))] { return tv + u }
+        }
+        return nil
+    }
+
+    /// "first" ... "twelfth", "1st", "2nd", "3rd", "4th"; "last" = -1.
+    public static func ordinal(_ token: String) -> Int? {
+        let words = [
+            "first": 1, "second": 2, "third": 3, "fourth": 4, "forth": 4, "fifth": 5, "sixth": 6, "seventh": 7,
+            "eighth": 8, "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "last": -1,
+        ]
+        if let v = words[token] { return v }
+        if let m = token.wholeMatch(of: /(\d{1,2})(st|nd|rd|th)/), let n = Int(m.1), n >= 1 { return n }
+        return nil
+    }
+
+    /// English cardinal as written, 1...99 ("one", "twelve", "twenty-one"); nil outside. `Parser` reads every result
+    /// back. Used for the answer-phase contextual strings.
+    public static func spelled(_ n: Int) -> String? {
+        let units = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+        let teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+        let tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+        switch n {
+        case 1...9: return units[n]
+        case 10...19: return teens[n - 10]
+        case 20...99:
+            let (t, u) = (n / 10, n % 10)
+            return u == 0 ? tens[t] : tens[t] + "-" + units[u]
+        default: return nil
+        }
+    }
+
+    /// "first" ... "tenth" as written, for the answer-phase contextual strings.
+    public static let ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
+}
+
 public enum Fuzzy {
     /// Optimal string alignment distance (Damerau-Levenshtein without repeated edits), capped.
     public static func osa(_ a: String, _ b: String, cap: Int = 3) -> Int {
@@ -301,5 +432,73 @@ public enum Fuzzy {
         var out: [Character] = []
         for (i, d) in codes.enumerated() where i == 0 || d != codes[i - 1] { out.append(d) }
         return String(out.enumerated().filter { $0.offset == 0 || $0.element != "0" }.map(\.element))
+    }
+
+    /// Phonetic key of a folded lowercase word for `language`: Koelner Phonetik for German, `metaphone` for English.
+    public static func phonetic(_ s: String, language: AppLanguage) -> String {
+        language == .de ? cologne(s) : metaphone(s)
+    }
+
+    /// A compact Metaphone-style key for folded lowercase English input ("relaunch", "relonch", "rilonch" -> "RLNX").
+    /// English spelling rules first (silent initial letters, "ph", "th", "sh", "ch", "ck", "gh", soft "c" and "g",
+    /// "tion"), then voiced and voiceless pairs share a code (b/p, d/t, f/v, g/k/q, s/z), as STT confuses them. Vowels
+    /// count only at the start.
+    public static func metaphone(_ s: String) -> String {
+        var c = Array(s.filter { $0 >= "a" && $0 <= "z" })
+        guard !c.isEmpty else { return "" }
+        if c.count >= 2, ["kn", "gn", "pn", "wr", "ps"].contains(String(c[0...1])) { c.removeFirst() }
+        if c.first == "x" { c[0] = "s" }
+        func at(_ i: Int) -> Character? { c.indices.contains(i) ? c[i] : nil }
+        func isVowel(_ ch: Character?) -> Bool { ch.map { "aeiouy".contains($0) } ?? false }
+        func isSoft(_ ch: Character?) -> Bool { ch.map { "eiy".contains($0) } ?? false }
+        var codes: [Character] = []
+        var i = 0
+        while i < c.count {
+            let ch = c[i], next = at(i + 1)
+            var code = "", step = 1
+            switch ch {
+            case "a", "e", "i", "o", "u": code = "A"
+            case "y": code = isVowel(next) ? "Y" : "A"
+            case "b": code = "P"
+            case "p": if next == "h" { code = "F"; step = 2 } else { code = "P" }
+            case "d": if next == "g", isSoft(at(i + 2)) { code = "J"; step = 2 } else { code = "T" }
+            case "t":
+                if next == "h" { code = "O"; step = 2 }
+                else if next == "c", at(i + 2) == "h" { code = "X"; step = 3 }
+                else if next == "i", let v = at(i + 2), "ao".contains(v) { code = "X" }
+                else { code = "T" }
+            case "f", "v": code = "F"
+            case "g":
+                if next == "h" { code = i == 0 || isVowel(at(i + 2)) ? "K" : ""; step = 2 }
+                else if next == "n", at(i + 2) == nil { code = "" }
+                else { code = isSoft(next) ? "J" : "K" }
+            case "c":
+                if next == "h" { code = "X"; step = 2 }
+                else if next == "k" { code = "K"; step = 2 }
+                else { code = isSoft(next) ? "S" : "K" }
+            case "k", "q": code = "K"
+            case "j": code = "J"
+            case "s":
+                if next == "h" { code = "X"; step = 2 }
+                else if next == "c", at(i + 2) == "h" { code = "X"; step = 3 }
+                else if next == "i", let v = at(i + 2), "ao".contains(v) { code = "X" }
+                else { code = "S" }
+            case "z": code = "S"
+            case "x": code = "KS"
+            case "w":
+                if next == "h" { code = "W"; step = 2 } else { code = isVowel(next) ? "W" : "" }
+            case "h": code = isVowel(next) ? "H" : ""
+            case "l": code = "L"
+            case "m": code = "M"
+            case "n": code = "N"
+            case "r": code = "R"
+            default: code = ""
+            }
+            codes.append(contentsOf: code)
+            i += step
+        }
+        var out: [Character] = []
+        for (i, d) in codes.enumerated() where i == 0 || d != codes[i - 1] { out.append(d) }
+        return String(out.enumerated().filter { $0.offset == 0 || $0.element != "A" }.map(\.element))
     }
 }

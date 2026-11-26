@@ -4,7 +4,7 @@ This document uses fantasy names for project codes, company names and distinctiv
 
 spikes/ holds unpublished research code and is not part of this repository.
 
-Instance: ActiveCollab 8 (`GET /api/v1/info`, VERIFIED). I used GET requests only. The token came from `ac-mcp/.ac-token-cache` (format `{userId}-…`, sent as the full `X-Angie-AuthApiToken`) and is not printed here. `/user-session` reports `authenticated_with: ApiSubscription` (VERIFIED).
+Instance: ActiveCollab 8 (`GET /api/v1/info`, VERIFIED). I used GET requests only. The research reused an existing API token from a local MCP server (format `{userId}-…`, sent as the full `X-Angie-AuthApiToken`); it is not printed here. `/user-session` reports `authenticated_with: ApiSubscription` (VERIFIED).
 Working files are in `spikes/acapi`:
 - `acget.sh`: GET helper
 - `bench.sh`: latency runs
@@ -205,6 +205,6 @@ if let http = resp as? HTTPURLResponse, http.statusCode == 301,
 ```
 
 ## Open points for the architect
-- **Token:** reusing `ac-mcp/.ac-token-cache` works (VERIFIED). Issuing its own token through `POST /issue-token` is ASSUMED to work the same way; I did not test it because of the GET-only rule.
+- **Token:** reusing an existing API token works (VERIFIED). Issuing its own token through `POST /issue-token` is ASSUMED to work the same way; I did not test it because of the GET-only rule. (The app now signs in this way, see PLAN 2.2.)
 - **Chrome:** setting the URL of an existing AC tab reloads the whole SPA (a large `main.js` bundle, browser-cached). Switching routes in-page without a reload would need JavaScript inside the tab. Both points are ASSUMED and not tested.
 - **Auto-pick versus list:** the signals separate 628 clearly from the other WWT projects. Whether to auto-open on a clear score lead or always show the numbered list is a product decision.

@@ -52,15 +52,17 @@ public struct Config: Codable, Sendable, Equatable {
     public static let currentVersion = 1
 
     public var version = Config.currentVersion
-    /// Web and API root. The API lives at {acBaseURL}/api/v1.
-    public var acBaseURL = URL(string: "https://ac.example.com")!
-    /// Own AC user id. nil: take it from the token prefix ("538-…").
+    /// Web and API root. The API lives at {acBaseURL}/api/v1. The default is `placeholderBaseURL` until the user
+    /// enters the address in the setup window.
+    public var acBaseURL = Config.placeholderBaseURL
+    /// Own AC user id, for a token without the user id prefix ("538-…"). The app takes the id from the token when the
+    /// token carries one, so a value left over from another AC address never applies to a new one.
     public var userId: Int? = nil
     /// Route for "Meine Aufgaben". "{me}" becomes the user id; while it is unknown, "/my-work" opens instead.
     public var myTasksPath = Routes.defaultMyTasksPath
     /// Spoken aliases per code as written in AC: ["IBN": ["eben"], "S+K": ["eska"]].
     public var aliases: [String: [String]] = [:]
-    /// Extra spoken words per title word, on top of `ResolverConfig.synonyms`: ["armaturenbrett": ["cockpit"]].
+    /// Title words per extra spoken word, on top of `ResolverConfig.synonyms`: ["armaturenbrett": ["cockpit"]].
     /// Case and umlauts do not matter (`ResolverConfig(synonyms:)` folds them).
     public var synonyms: [String: [String]] = [:]
     /// Promote repeated picks to aliases (`History.learnedAliases`, REVIEW m9).
@@ -85,8 +87,6 @@ public struct Config: Codable, Sendable, Equatable {
     public var launchAtLogin = false
     /// Debug: keep local recordings of utterances for tuning (M7). Off by default.
     public var saveRecordings = false
-    /// ac-mcp checkout for the one-time token import (reads .ac-token-cache or .env, never writes).
-    public var acMcpPath: String? = nil
     /// How Chrome comes to the front after a tab change (REVIEW M4 activation test): "appleScript" (default),
     /// "runningApplication" or "workspace" (`ACVoiceSystem.ActivationStrategy` raw values). Unknown values mean the
     /// default.
@@ -94,8 +94,16 @@ public struct Config: Codable, Sendable, Equatable {
     /// Overlay background (manual glass check): "liquidGlass" (default), "appKitGlass" or "hudMaterial"
     /// (`ACVoiceUI.OverlayBackdrop` raw values). Unknown values mean the default.
     public var overlayBackdrop = "liquidGlass"
+    /// Language of the texts, the voice commands and the speech recognition: "auto" (default: the first macOS
+    /// language, German when it is German, else English), "de" or "en". Unknown values mean "auto".
+    public var language = "auto"
 
     public init() {}
+
+    /// The language this config runs in, for the given preferred languages (`Locale.preferredLanguages`).
+    public func appLanguage(preferred: [String] = Locale.preferredLanguages) -> AppLanguage {
+        AppLanguage(setting: language, preferred: preferred)
+    }
 
     /// The "Meine Aufgaben" URL for this config. Uses `userId` only; the app fills it from the token prefix
     /// for the flow (`Controller.flowConfig`).
@@ -104,7 +112,7 @@ public struct Config: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case version, acBaseURL, userId, myTasksPath, aliases, synonyms, learnAliases, hotkey, earcons, inputDeviceUID
         case avoidBluetoothInput, fastSelect, contextualStringLimit, visibleChoices, choicesWindow, maxUnclearAnswers
-        case launchAtLogin, saveRecordings, acMcpPath, chromeActivation, overlayBackdrop
+        case launchAtLogin, saveRecordings, chromeActivation, overlayBackdrop, language
     }
 
     public init(from decoder: Decoder) throws {
@@ -124,8 +132,9 @@ public struct Config: Codable, Sendable, Equatable {
         get(.avoidBluetoothInput, &d.avoidBluetoothInput); get(.fastSelect, &d.fastSelect)
         get(.contextualStringLimit, &d.contextualStringLimit); get(.visibleChoices, &d.visibleChoices)
         get(.choicesWindow, &d.choicesWindow); get(.maxUnclearAnswers, &d.maxUnclearAnswers)
-        get(.launchAtLogin, &d.launchAtLogin); get(.saveRecordings, &d.saveRecordings); getOptional(.acMcpPath, &d.acMcpPath)
+        get(.launchAtLogin, &d.launchAtLogin); get(.saveRecordings, &d.saveRecordings)
         get(.chromeActivation, &d.chromeActivation); get(.overlayBackdrop, &d.overlayBackdrop)
+        get(.language, &d.language)
         // Clamp values that would break the flow.
         d.visibleChoices = min(max(d.visibleChoices, 1), 9)
         d.contextualStringLimit = min(max(d.contextualStringLimit, 0), 100)
@@ -138,6 +147,39 @@ public struct Config: Codable, Sendable, Equatable {
     /// The AC token travels as a bearer header to this host: https with a host only (no http, no "https://").
     public static func isValidBaseURL(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "https" && !(url.host ?? "").isEmpty
+    }
+
+    /// The default `acBaseURL`. It stands for "no address yet": the setup window leaves its field empty and the app
+    /// never sends a password there.
+    public static let placeholderBaseURL = URL(string: "https://ac.example.com")!
+
+    /// `acBaseURL` is still the placeholder.
+    public var hasPlaceholderBaseURL: Bool { Self.sameBase(acBaseURL, Self.placeholderBaseURL) }
+
+    /// An address the user typed, as the app stores it: https only, a host required, lowercase host, no user info,
+    /// path, query, fragment, trailing slash or default port (443). Another port stays: it names another
+    /// ActiveCollab (`sameBase`). A bare host gets "https://". nil when the text is no such address (http, another
+    /// scheme, no host).
+    public static func normalizedBaseURL(_ text: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: \.isWhitespace) else { return nil }
+        let withScheme = trimmed.contains("://") ? trimmed : "https://" + trimmed
+        guard var c = URLComponents(string: withScheme), c.scheme?.lowercased() == "https",
+              let host = c.host, !host.isEmpty, c.user == nil, c.password == nil else { return nil }
+        c.scheme = "https"
+        c.host = host.lowercased()
+        if c.port == 443 { c.port = nil }
+        c.path = ""
+        c.query = nil
+        c.fragment = nil
+        guard let url = c.url, isValidBaseURL(url) else { return nil }
+        return url
+    }
+
+    /// Two base URLs name the same ActiveCollab (case of scheme and host, trailing slashes and paths ignored).
+    public static func sameBase(_ a: URL, _ b: URL) -> Bool {
+        func key(_ u: URL) -> String { "\(u.scheme?.lowercased() ?? "")://\(u.host?.lowercased() ?? ""):\(u.port ?? 443)" }
+        return key(a) == key(b)
     }
 
     /// Tolerant decode: junk or an empty file gives the defaults.

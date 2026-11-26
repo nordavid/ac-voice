@@ -262,7 +262,7 @@ import ACVoiceCore
         var h = wwtList()
         h.onset(); h.ended()
         h.send(.utterance(h.gen!, [Hypothesis("die"), Hypothesis("die Hallo")]))
-        #expect(h.flow.list?.unclear == 1 && h.model.hint == FlowText.unclearAnswer("die"))
+        #expect(h.flow.list?.unclear == 1 && h.model.hint == FlowText.de.unclearAnswer("die"))
     }
 
     // MARK: Deadline
@@ -393,7 +393,7 @@ import ACVoiceCore
         h.partial("zwei, nein drei")
         #expect(h.flow.list?.pendingPick == nil && h.phase == .choices)
         h.ended(); h.final("zwei, nein drei")
-        #expect(h.phase == .choices && h.model.hint == FlowText.unclearAnswer("zwei, nein drei"))
+        #expect(h.phase == .choices && h.model.hint == FlowText.de.unclearAnswer("zwei, nein drei"))
     }
 
     @Test func changingPartialResetsThePick() {

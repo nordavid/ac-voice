@@ -1,5 +1,6 @@
 import { Resvg } from "@resvg/resvg-js";
 import { describe, expect, it } from "vitest";
+import { APP_MISSING } from "../src/i18n.js";
 import { glyphSvg, keySvg, marketplaceSvg } from "../src/icons.js";
 import type { StateMsg } from "../src/protocol.js";
 import { choicesLeft, COLORS, escapeXml, faceKey, fitEnd, isAnimated, renderVoice, SIZE, textWidth, toDataUrl } from "../src/render.js";
@@ -9,15 +10,15 @@ import type { View } from "../src/view.js";
 const rasterize = (svg: string) => new Resvg(svg, { font: { loadSystemFonts: false } }).render();
 const NOW = 1_732_440_005_000;
 const st = (phase: StateMsg["phase"], extra: Partial<StateMsg> = {}): StateMsg => ({ v: 1, t: "state", seq: 1, phase, since: NOW - 1000, ...extra });
-const online = (state: StateMsg, extra: Partial<View> = {}): View => ({ link: "online", state, level: 0, ...extra });
+const online = (state: StateMsg, extra: Partial<View> = {}): View => ({ link: "online", state, level: 0, lang: "de", ...extra });
 const choices = (n: number, extra: Partial<StateMsg> = {}) =>
 	st("choices", { since: NOW - 2000, deadline: NOW + 4000, choices: Array.from({ length: n }, (_, i) => ({ n: i + 1, label: `L${i + 1}` })), ...extra });
 
 const views: Record<string, View> = {
-	offline: { link: "offline", level: 0 },
-	missing: { link: "offline", linkError: "App fehlt", level: 0 },
-	launching: { link: "launching", level: 0 },
-	onlineNoState: { link: "online", level: 0 },
+	offline: { link: "offline", level: 0, lang: "de" },
+	missing: { link: "offline", linkError: APP_MISSING, level: 0, lang: "de" },
+	launching: { link: "launching", level: 0, lang: "de" },
+	onlineNoState: { link: "online", level: 0, lang: "de" },
 	idle: online(st("idle")),
 	micStarting: online(st("listening", { micReady: false })),
 	listening: online(st("listening", { micReady: true }), { level: 0.6 }),
@@ -85,6 +86,25 @@ describe("faces", () => {
 		expect(renderVoice(views.choices!, NOW)).toContain(`stroke="${COLORS.amberInk}"`);
 		// Listening, processing, choices and success carry no text.
 		for (const v of [views.listening!, views.processing!, views.choices!, views.success!]) expect(renderVoice(v, NOW)).not.toContain("<text");
+	});
+
+	it("shows English captions when the view is English", () => {
+		const en = (v: View): View => ({ ...v, lang: "en" });
+		expect(renderVoice(en(views.offline!), NOW)).toContain(">Start</text>");
+		expect(renderVoice(en(views.missing!), NOW)).toContain(">App missing</text>");
+		expect(renderVoice(en(views.launching!), NOW)).toContain(">Starting</text>");
+		expect(renderVoice(en(views.idle!), NOW)).toContain(">AC</text>");
+		// The app's own message arrives in its language and shows as it is (cut to the key's width).
+		const error = online(st("error", { message: "I can’t hear anything", lang: "en" }), { lang: "en" });
+		expect(renderVoice(error, NOW)).toContain(">I can’t hear a…</text>");
+		// A link error that is no known reason code shows as it is.
+		expect(renderVoice({ link: "offline", linkError: "Kaputt", level: 0, lang: "en" }, NOW)).toContain(">Kaputt</text>");
+		// The captions fit the key in both languages.
+		for (const lang of ["de", "en"] as const) {
+			for (const k of ["offline", "missing", "launching"]) {
+				expect(renderVoice({ ...views[k]!, lang }, NOW), `${lang} ${k}`).not.toContain("…</text>");
+			}
+		}
 	});
 
 	it("shows the online-without-snapshot gap as the launching spinner, never as offline", () => {
@@ -200,6 +220,8 @@ describe("animation", () => {
 		expect(faceKey(online(st("listening", { micReady: false })))).not.toBe(a);
 		expect(faceKey(views.processing!)).not.toBe(a);
 		expect(faceKey(views.offline!)).not.toBe(faceKey(views.missing!));
+		// A language change repaints the caption.
+		expect(faceKey({ ...views.offline!, lang: "en" })).not.toBe(faceKey(views.offline!));
 	});
 });
 

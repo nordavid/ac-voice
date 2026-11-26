@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StateMsg } from "../src/protocol.js";
+import { fromStreamDeck, linkErrorText, parseLang } from "../src/i18n.js";
 import { ViewModel } from "../src/view.js";
 
 const st = (seq: number, phase: StateMsg["phase"], extra: Partial<StateMsg> = {}): StateMsg => ({ v: 1, t: "state", seq, phase, since: 1000, ...extra });
@@ -12,7 +13,7 @@ describe("ViewModel", () => {
 		m.state(st(1, "listening", { micReady: true }));
 		m.level(0.8);
 		m.status("offline");
-		expect(m.view).toEqual({ link: "offline", linkError: undefined, level: 0, state: undefined, windowStart: undefined });
+		expect(m.view).toEqual({ link: "offline", linkError: undefined, level: 0, state: undefined, windowStart: undefined, lang: "de" });
 		m.status("offline", "App fehlt");
 		expect(m.view.linkError).toBe("App fehlt");
 	});
@@ -53,5 +54,43 @@ describe("ViewModel", () => {
 		now = 20_000;
 		m.state(st(5, "choices", { choices: list(["B", "C"]), deadline: 26_000 }));
 		expect(m.view.windowStart).toBe(20_000);
+	});
+
+	it("follows the Stream Deck language until the app names its own, and keeps the app's", () => {
+		const m = new ViewModel(() => 0, "en");
+		expect(m.view.lang).toBe("en");
+		m.fallback("de");
+		expect(m.view.lang).toBe("de");
+		m.status("online");
+		m.state(st(1, "idle", { lang: "en" }));
+		expect(m.view.lang).toBe("en");
+		// An app restart drops the link; its language stays until the next snapshot says otherwise.
+		m.status("offline");
+		expect(m.view.lang).toBe("en");
+		m.fallback("de");
+		expect(m.view.lang).toBe("en");
+		m.status("online");
+		m.state(st(1, "idle", { lang: "de-DE" }));
+		expect(m.view.lang).toBe("de");
+		// An older app sends no language, an unknown one changes nothing.
+		m.state(st(2, "idle"));
+		m.state(st(3, "idle", { lang: "fr" }));
+		expect(m.view.lang).toBe("de");
+	});
+});
+
+describe("languages", () => {
+	it("maps codes the way the app does", () => {
+		expect([parseLang("de"), parseLang("de-AT"), parseLang("de_DE"), parseLang("EN-us"), parseLang("fr"), parseLang(7)]).toEqual([
+			"de",
+			"de",
+			"de",
+			"en",
+			undefined,
+			undefined,
+		]);
+		expect([fromStreamDeck("de"), fromStreamDeck("en"), fromStreamDeck("zh_CN"), fromStreamDeck(undefined)]).toEqual(["de", "en", "en", "en"]);
+		expect(linkErrorText("app-missing", "de")).toBe("App fehlt");
+		expect(linkErrorText("app-missing", "en")).toBe("App missing");
 	});
 });

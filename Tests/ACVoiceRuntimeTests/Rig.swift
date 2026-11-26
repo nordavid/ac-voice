@@ -62,16 +62,19 @@ enum Fixture {
     static func taskURL(_ pid: Int, _ tid: Int) -> URL { Routes.task(base, projectId: pid, taskId: tid) }
 }
 
-/// Creates the fake index when the controller asks for one (launch with a token, token import).
+/// Creates the fake index when the controller asks for one (launch with a token, sign-in, pasted token, new address).
 @MainActor
 final class IndexFactory {
     var snapshot: IndexSnapshot
     private(set) var made: [FakeIndex] = []
+    /// The AC address of each index made.
+    private(set) var bases: [URL] = []
     init(snapshot: IndexSnapshot) { self.snapshot = snapshot }
 
-    func make(_ userId: Int) -> FakeIndex {
+    func make(_ userId: Int, base: URL = Fixture.base) -> FakeIndex {
         let i = FakeIndex(userId: userId, snapshot: snapshot)
         made.append(i)
+        bases.append(base)
         return i
     }
 }
@@ -100,8 +103,8 @@ final class Rig {
 
     init(token: StoredToken = .present(userId: Fixture.userId), snapshot: IndexSnapshot = Fixture.snapshot(),
          mic: Permission = .granted, config: Config = Fixture.config, history: History = History(),
-         ipc: (any IPCEndpoint)? = nil, timings: FlowTimings = .init()) {
-        tokens = FakeTokens(token)
+         ipc: (any IPCEndpoint)? = nil, timings: FlowTimings = .init(), preferredLanguages: [String] = ["de-DE"]) {
+        tokens = FakeTokens(token, account: KeychainTokenStore.account(for: config.acBaseURL))
         permissions = FakePermissions(microphone: mic)
         store = FakeStore(config: config, history: history)
         let factory = IndexFactory(snapshot: snapshot)
@@ -109,9 +112,10 @@ final class Rig {
         let ipc = ipc ?? FakeIPC()
         self.ipc = ipc
         let services = Services(
-            speech: speech, tokens: tokens, makeIndex: { userId, _ in factory.make(userId) },
+            speech: speech, tokens: tokens, makeIndex: { userId, config in factory.make(userId, base: config.acBaseURL) },
             permissions: permissions, overlay: EscapeClosesOverlay(overlay, escape: escape), ipc: ipc, chrome: chrome, earcons: earcons, hotkey: hotkey,
-            loginItem: login, clock: clock, store: store, workspace: workspace)
+            loginItem: login, clock: clock, store: store, workspace: workspace,
+            preferredLanguages: preferredLanguages)
         controller = Controller(services: services, timings: timings)
         controller.onNeedsSetup = { [weak self] in self?.setupRequests += 1 }
         controller.onSecondInstance = { [weak self] in self?.secondInstance = true }

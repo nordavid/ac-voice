@@ -70,19 +70,28 @@ public struct Interpreter: Sendable {
     public var resolver: Resolver
     /// Learned picks order equal matches. Replace it after `History.recordPick`.
     public var history: History
-    public init(resolver: Resolver, history: History = .init()) { self.resolver = resolver; self.history = history }
+    /// Language of the voice commands this interpreter understands. The resolver follows it
+    /// (`ResolverConfig.language`: phonetic keys and number words).
+    public var language: AppLanguage { didSet { resolver.config.language = language } }
+    public init(resolver: Resolver, history: History = .init(), language: AppLanguage = .de) {
+        var resolver = resolver
+        resolver.config.language = language
+        self.resolver = resolver; self.history = history; self.language = language
+    }
 
     /// The app's interpreter in one call: `Interpreter.entries(projects, config:, history:)`, `config.synonyms` and the
     /// history's learned picks. Rebuild it whenever the index snapshot, the config or the history changes.
-    public init(projects: [ProjectEntry], config: Config, history: History) {
-        self.init(resolver: Resolver(projects: Self.entries(projects, config: config, history: history),
-                                     config: ResolverConfig(synonyms: config.synonyms)), history: history)
+    public init(projects: [ProjectEntry], config: Config, history: History, language: AppLanguage = .de) {
+        self.init(resolver: Resolver(projects: Self.entries(projects, config: config, history: history, language: language),
+                                     config: ResolverConfig(synonyms: config.synonyms)), history: history, language: language)
     }
 
     /// Index entries (AC signals, company aliases) plus what ac-voice knows locally: `config.aliases` per code,
     /// `History.learnedAliases` when `config.learnAliases` is on (REVIEW m9), and the history's opens as
     /// `Signals.recentOpens` (an entry keeps its own opens when the history has none for it).
-    public static func entries(_ projects: [ProjectEntry], config: Config, history: History) -> [ProjectEntry] {
+    /// `language` is the command language: `History.learnedAliases` reads the picks with its rules.
+    public static func entries(_ projects: [ProjectEntry], config: Config, history: History,
+                               language: AppLanguage = .de) -> [ProjectEntry] {
         var base = projects.map { p -> ProjectEntry in
             var e = p.addingAliases(byCode: config.aliases)
             let opens = history.recentOpens(p.id)
@@ -90,7 +99,7 @@ public struct Interpreter: Sendable {
             return e
         }
         if config.learnAliases {
-            let learned = history.learnedAliases(projects: base)
+            let learned = history.learnedAliases(projects: base, language: language)
             if !learned.isEmpty { base = base.map { $0.addingAliases(byCode: learned) } }
         }
         return base
@@ -99,14 +108,18 @@ public struct Interpreter: Sendable {
     // MARK: Command phase
 
     public func command(_ hyps: [Hypothesis], now: Date = .now) -> Interpretation {
-        let parsed = hyps.filter { !$0.text.isEmpty }.map { (h: $0, c: Parser.command($0.text)) }
+        let texts = hyps.filter { !$0.text.isEmpty }
+        let readings = texts.map { parse($0.text, now: now) }
+        let parsed = zip(texts, readings).map { (h: $0, c: $1.command) }
         let heard = parsed.first?.h.text ?? ""
         if parsed.contains(where: { $0.c == .openMyTasks }) { return .myTasks }
         if let firstBest = parsed.first(where: { $0.h.weight >= 1 }), firstBest.c == .cancel { return .cancel }
 
-        // Explicit tickets ("Ticket 412", "öffne 47285"): any hypothesis with a ticket wins.
+        // Explicit tickets ("Ticket 412", "öffne 47285"): any hypothesis with a ticket wins. "Open the 2027 one": ST glues
+        // the pronoun into "20271", so a number another best hypothesis heard as a title number before "one" is no ticket.
+        let glued = Set(zip(texts, readings).filter { $0.0.weight >= 1 }.compactMap { $0.1.titleNumber }.map { $0 * 10 + 1 })
         let tasks = parsed.compactMap { p -> (w: Double, q: [Token], n: Int)? in
-            if case let .openTask(q, n) = p.c { return (p.h.weight, q, n) }
+            if case let .openTask(q, n) = p.c, !glued.contains(n) { return (p.h.weight, q, n) }
             return nil
         }
         if let first = tasks.first(where: { $0.w >= 1 }) ?? tasks.first {
@@ -130,9 +143,9 @@ public struct Interpreter: Sendable {
         let r = resolver.decide(Resolver.merge(lists), learned: history.picks(for: key))
 
         // "<project> <number>" is a ticket unless a matching title contains that number ("TYPO 3", "Relaunch 2026").
-        if let imp = Parser.implicitTicket(best.q), !explains(best.q, Set(imp.numeralIndices), among: r, now: now) {
+        if let imp = Parser.implicitTicket(best.q, language: language), !explains(best.q, Set(imp.numeralIndices), among: r, now: now) {
             let same = queries.compactMap { e -> (w: Double, q: [Token])? in
-                guard let i = Parser.implicitTicket(e.q), i.number == imp.number else { return nil }
+                guard let i = Parser.implicitTicket(e.q, language: language), i.number == imp.number else { return nil }
                 return (e.w, i.project)
             }
             return .task(taskRequest(number: imp.number, queries: same, implicit: true, now: now))
@@ -150,11 +163,12 @@ public struct Interpreter: Sendable {
     func taskRequest(number: Int, queries: [(w: Double, q: [Token])], implicit: Bool, now: Date) -> TaskRequest {
         let tier = queries.contains { $0.w >= 1 } ? queries.filter { $0.w >= 1 } : queries
         // The first hypothesis with project words names the query key and decides about leftover numerals.
-        guard let best = tier.first(where: { $0.q.contains { !Parser.isNumeral($0) } }) ?? tier.first else {
+        let numeral = { (t: Token) in Parser.isNumeral(t, language: language) }
+        guard let best = tier.first(where: { $0.q.contains { !numeral($0) } }) ?? tier.first else {
             return TaskRequest(number: number, implicit: implicit)
         }
-        let numerals = Set(best.q.indices.filter { Parser.isNumeral(best.q[$0]) })
-        let worded = tier.filter { $0.q.contains { !Parser.isNumeral($0) } }
+        let numerals = Set(best.q.indices.filter { numeral(best.q[$0]) })
+        let worded = tier.filter { $0.q.contains { !numeral($0) } }
         guard !worded.isEmpty else {
             return TaskRequest(number: number, projects: nil, query: "", confident: numerals.isEmpty, implicit: implicit)
         }
@@ -163,7 +177,7 @@ public struct Interpreter: Sendable {
         var r = resolver.decide(Resolver.merge(worded.map { ($0.w, resolver.score($0.q, now: now)) }), learned: learned)
         if case .none = r, !numerals.isEmpty {
             // Stray numerals can push coverage below the threshold: retry with the words alone.
-            let words = worded.map { e in (e.w, resolver.score(e.q.filter { !Parser.isNumeral($0) }, now: now)) }
+            let words = worded.map { e in (e.w, resolver.score(e.q.filter { !numeral($0) }, now: now)) }
             r = resolver.decide(Resolver.merge(words), learned: learned)
         }
         if case .none = r, worded.count < tier.count {
@@ -180,12 +194,26 @@ public struct Interpreter: Sendable {
     /// (REVIEW m9). nil when no hypothesis holds project words. For tickets use `TaskRequest.query`.
     public func correctionKey(_ hyps: [Hypothesis]) -> String? {
         let queries = hyps.filter { !$0.text.isEmpty }.compactMap { h -> (w: Double, q: [Token])? in
-            if case let .openProject(q) = Parser.command(h.text) { return (h.weight, q) }
+            if case let .openProject(q) = Parser.command(h.text, language: language) { return (h.weight, q) }
             return nil
         }
         guard let best = queries.first(where: { $0.w >= 1 }) ?? queries.first else { return nil }
         let key = TextNorm.queryKey(best.q)
         return key.isEmpty ? nil : key
+    }
+
+    /// `Parser.command` with the project titles for the English "the <digits> one": "one" is the pronoun when a candidate
+    /// title explains the digits ("the 2027 one", "the Sensor 45 one"), else the last digit of the number ("the
+    /// maintenance 58 one" -> 581, "the 4728 one" -> 47281). `titleNumber`: the digits read as a title number.
+    func parse(_ text: String, now: Date) -> (command: Command, titleNumber: Int?) {
+        let c = Parser.command(text, language: language)
+        guard let run = Parser.pronounOneRun(text, language: language) else { return (c, nil) }
+        // Without other project words the query is the number alone ("the 2027 one").
+        var q = [Token(text: String(run))]
+        if case let .openProject(words) = c { q = words }
+        let digits = Parser.implicitTicket(q, language: language)?.numeralIndices ?? q.indices
+        if explains(q, Set(digits), among: resolver.decide(resolver.score(q, now: now)), now: now) { return (c, run) }
+        return (Parser.command(text, language: language, titleNumber: false), nil)
     }
 
     /// True when a candidate of `r` explains every token at `indices` of `q`.
@@ -209,7 +237,7 @@ public struct Interpreter: Sendable {
         var altPick: Int? = nil, bestAnswered = false
         for h in hyps where !h.text.isEmpty {
             let isBest = h.weight >= 1
-            switch Parser.selection(h.text, count: candidates.count) {
+            switch Parser.selection(h.text, count: candidates.count, language: language) {
             case .pick(let n):
                 let i = n == -1 ? candidates.count - 1 : n - 1
                 guard candidates.indices.contains(i) else { break }

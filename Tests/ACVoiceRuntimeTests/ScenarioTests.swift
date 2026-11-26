@@ -57,7 +57,9 @@ import Testing
 
         await rig.advance(0.7)
         #expect(rig.phase == .idle && rig.overlay.hides == [0.2])
-        #expect(rig.fakeIPC.phases == [.listening, .processing, .success, .idle])
+        // The launch sends the idle state with the app language first (a plugin that connects before any press).
+        #expect(rig.fakeIPC.phases == [.idle, .listening, .processing, .success, .idle])
+        #expect(rig.fakeIPC.states.first?.lang == "de" && rig.fakeIPC.states.first?.seq == 0)
         let lat = rig.controller.latencies
         #expect(lat[.speechEndToFinal]?.last == 580)
         #expect(lat[.finalToOpened]?.count == 1 && lat[.pressToMic]?.count == 1)
@@ -120,19 +122,32 @@ import Testing
         await none.command("Meine Aufgaben")
         #expect(none.chrome.opened == [URL(string: "https://ac.example.com/my-work")!])
 
-        // userId in config.json wins over the token prefix and is never replaced by it.
+        // userId in config.json fills in for a token without the prefix.
         var config = Fixture.config
         config.userId = 4711
-        let pinned = Rig(config: config)
+        let pinned = Rig(token: .present(userId: nil), config: config)
         await pinned.start()
         await pinned.command("Meine Aufgaben")
         #expect(pinned.chrome.opened == [URL(string: "https://ac.example.com/users/4711/tasks")!])
-        #expect(pinned.factory.made.map(\.userId) == [4711])
+        #expect(pinned.factory.made.map(\.userId) == [4711] && pinned.controller.status.token == .present)
+        // Without a token the pinned id still names "Meine Aufgaben".
+        let pinnedNoToken = Rig(token: .missing, config: config)
+        await pinnedNoToken.start()
+        await pinnedNoToken.command("Meine Aufgaben")
+        #expect(pinnedNoToken.chrome.opened == [URL(string: "https://ac.example.com/users/4711/tasks")!])
 
-        // A token imported later fills the id in without a restart.
+        // A token with a prefix wins over a pinned id that differs: that id belongs to another account or another
+        // AC address. config.json keeps it.
+        let other = Rig(config: config)
+        await other.start()
+        await other.command("Meine Aufgaben")
+        #expect(other.chrome.opened == [Fixture.myTasksURL] && other.factory.made.map(\.userId) == [538])
+        #expect(other.controller.config.userId == 4711 && other.store.config.userId == 4711)
+
+        // A token saved later fills the id in without a restart.
         let later = Rig(token: .missing)
         await later.start()
-        #expect(await later.controller.importToken())   // FakeTokens: user id 538 from the token prefix
+        #expect(await later.controller.saveToken("538-testtokenabc"))   // user id 538 from the token prefix
         await later.settle()
         await later.command("Meine Aufgaben")
         #expect(later.chrome.opened == [Fixture.myTasksURL])
@@ -161,11 +176,11 @@ import Testing
         let rig = Rig()
         await rig.start()
         await rig.command("Hallo Welt")
-        #expect(rig.phase == .retry && rig.model.message == FlowText.notUnderstoodRetry)
+        #expect(rig.phase == .retry && rig.model.message == FlowText.de.notUnderstoodRetry)
         let rearm = try #require(rig.speech.rearms.last)
         #expect(rearm.mode == .command && rearm.gen == SpeechGen(session: 1, utterance: 2))
         #expect(rearm.context == rig.controller.commandContext)
-        #expect(rig.fakeIPC.states.last?.phase == .listening && rig.fakeIPC.states.last?.message == FlowText.notUnderstoodRetry)
+        #expect(rig.fakeIPC.states.last?.phase == .listening && rig.fakeIPC.states.last?.message == FlowText.de.notUnderstoodRetry)
 
         await rig.say("Öffne WWT Relaunch")
         #expect(rig.chrome.opened == [Fixture.projectURL(628)])
@@ -179,7 +194,7 @@ import Testing
         await rig.start()
         await rig.command("Hallo Welt")
         await rig.say("Hallo Welt")
-        #expect(rig.phase == .error && rig.model.message == FlowText.notUnderstood)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.notUnderstood)
         #expect(rig.earcons.played.last == .error && !rig.speech.running)
         await rig.advance(FlowTimings().errorHold)
         #expect(rig.phase == .idle)
@@ -190,14 +205,14 @@ import Testing
         await rig.start()
         rig.chrome.results = [.success(.fallback(.denied))]
         await rig.command("WWT Relaunch")
-        #expect(rig.phase == .success && rig.model.hint == FlowText.automationHint)
+        #expect(rig.phase == .success && rig.model.hint == FlowText.de.automationHint)
         #expect(rig.controller.status.chromeAutomation == .denied)
         await rig.advance(FlowTimings().hintHold)
         #expect(rig.phase == .idle)
 
         rig.chrome.results = [.failure(.openFailed)]
         await rig.command("WWT Relaunch")
-        #expect(rig.phase == .error && rig.model.message == FlowText.openFailed)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.openFailed)
         #expect(rig.controller.history.recentOpens(628).count == 1)   // only the first open counts
     }
 }
@@ -244,7 +259,7 @@ import Testing
         rig.index?.revalidateCheck = IndexCheck(complete: false, timedOut: true)
         rig.chrome.tabURL = URL(string: "https://ac.example.com/projects/628")
         await rig.command("Öffne WWT Ticket 412")
-        #expect(rig.phase == .choices && rig.model.choices.count == 1 && rig.model.hint == FlowText.sayYesOrOne)
+        #expect(rig.phase == .choices && rig.model.choices.count == 1 && rig.model.hint == FlowText.de.sayYesOrOne)
         await rig.say("ja")
         #expect(rig.chrome.opened == [Fixture.taskURL(628, 31_412)])
     }
@@ -263,13 +278,16 @@ import Testing
         let rig = Rig()
         await rig.start()
         await rig.command("Ticket 47285")
-        #expect(rig.phase == .error && rig.model.message == FlowText.ticketNotFound(47_285))
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.ticketNotFound(47_285))
         await rig.advance(2)
 
         rig.index?.probeResult = .failure(.unauthorized)
         await rig.command("Ticket 47285")
-        #expect(rig.phase == .error && rig.model.message == "AC lehnt den Token ab")
-        #expect(rig.controller.status.token == .invalid && rig.controller.statusLines.contains(AppText.tokenInvalid))
+        // The card names the next step, and so does the menu: a 401 needs a new sign-in.
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.tokenRejected && rig.model.hint == FlowText.de.signInAgain)
+        #expect(ACError.unauthorized.userMessage == FlowText.de.tokenRejected)
+        #expect(rig.controller.status.token == .invalid && rig.controller.statusLines.contains(AppText.de.tokenInvalid))
+        #expect(AppText.de.tokenInvalid == "AC lehnt den Token ab. Melde dich in der Einrichtung neu an.")
     }
 }
 
@@ -355,7 +373,7 @@ import Testing
         rig.speech.emit(.partial(dt: "Öffne WWT Ticket 999", st: ""))
         rig.speech.emit(.utterance([Hypothesis("Öffne WWT Ticket 999")], latencyMs: nil))
         #expect(await rig.controller.settle(leaving: 1))   // the archive call waits
-        #expect(rig.phase == .processing && rig.model.message == FlowText.searchingTicket(999))
+        #expect(rig.phase == .processing && rig.model.message == FlowText.de.searchingTicket(999))
         #expect(rig.index?.archiveRequests == [[693]])
         // A press while AC searches cancels (REVIEW m5).
         rig.controller.trigger(.press(Press(id: "p2", source: .streamDeck)))
@@ -384,7 +402,7 @@ import Testing
         await rig.start()
         rig.speech.startError = .sourceFailed("no device")
         await rig.press()
-        #expect(rig.phase == .error && rig.model.message == FlowText.noInput)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.noInput)
         #expect(rig.earcons.played == [.error])
     }
 
@@ -393,7 +411,7 @@ import Testing
         await rig.start()
         #expect(rig.setupRequests == 1)   // at launch
         await rig.press()
-        #expect(rig.phase == .error && rig.model.message == FlowText.micDenied)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.micDenied)
         #expect(rig.speech.calls.contains("start") == false && rig.setupRequests == 2)
         #expect(rig.permissions.micRequests == 0)   // a press never asks: only a click in the setup window does
     }
@@ -407,7 +425,7 @@ import Testing
         await rig.settle()
         #expect(rig.phase == .listening)
         await rig.emit(.failed(.modelUnavailable))
-        #expect(rig.phase == .error && rig.model.message == FlowText.modelUnavailable)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.modelUnavailable)
     }
 
     @Test func warmingAndReadyDriveTheModelLine() async {
@@ -415,9 +433,9 @@ import Testing
         rig.speech.warmUpError = SpeechError.assetsUnavailable
         await rig.start()
         #expect(rig.controller.status.speech == .unavailable && !rig.controller.flow.speechWarm)
-        #expect(rig.controller.statusLines.contains(AppText.speechUnavailable) && rig.controller.needsAttention)
+        #expect(rig.controller.statusLines.contains(AppText.de.speechUnavailable) && rig.controller.needsAttention)
         await rig.press()
-        #expect(rig.model.warming && rig.model.message == FlowText.loadingModel)
+        #expect(rig.model.warming && rig.model.message == FlowText.de.loadingModel)
         await rig.emit(.warming)
         await rig.emit(.ready)
         #expect(!rig.model.warming && rig.controller.status.speech == .ready)
@@ -448,14 +466,16 @@ import Testing
         ipc.startError = IPCServerError.pathOccupied
         let rig = Rig(ipc: ipc)
         await rig.start()
-        #expect(!rig.secondInstance && rig.controller.status.ipcError == AppText.ipcUnavailable)
-        #expect(rig.controller.statusLines.contains(AppText.ipcUnavailable))
+        #expect(!rig.secondInstance && rig.controller.status.ipcError == AppText.de.ipcUnavailable)
+        #expect(rig.controller.statusLines.contains(AppText.de.ipcUnavailable))
     }
 }
 
 @MainActor
 @Suite struct TokenScenarioTests {
-    @Test func rejectedTokenThenReimportResetsTheClient() async {
+    /// A 401 only marks the token invalid: nothing renews it behind the user's back, the setup row asks for a new
+    /// sign-in, and a new token for the same user resets the client instead of making a new index.
+    @Test func rejectedTokenThenNewTokenResetsTheClient() async {
         let rig = Rig()
         rig.factory.snapshot = Fixture.snapshot()
         await rig.start()
@@ -464,32 +484,36 @@ import Testing
         rig.controller.refreshIndexNow()
         await rig.settle()
         #expect(rig.controller.status.token == .invalid && rig.controller.needsSetup)
-        #expect(rig.controller.statusLines.contains(AppText.tokenInvalid))
+        #expect(rig.controller.statusLines.contains(AppText.de.tokenInvalid))
+        #expect(rig.tokens.logins.isEmpty && rig.tokens.saved.isEmpty)
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let row = model.steps.first { $0.id == .token }
+        #expect(row?.status == AppText.de.tokenRejected && row?.tone == .todo && model.showsSignIn)
 
         rig.index?.fastReport = FakeIndex.report(notModified: 4)
-        #expect(await rig.controller.importToken())
+        #expect(await rig.controller.saveToken("538-NewTestTokenAbc"))
         await rig.settle()
-        #expect(rig.tokens.imports == 1 && rig.index?.resets == 1)
+        #expect(rig.tokens.saved == ["538-NewTestTokenAbc"] && rig.index?.resets == 1)
         #expect(rig.controller.status.token == .present && rig.controller.status.tokenMessage == nil)
         #expect(rig.factory.made.count == 1)   // same user: same index, token state reset
         #expect(rig.index?.calls.suffix(2).contains("refreshFast") == true)
     }
 
-    @Test func missingTokenThenImportAttachesTheIndex() async {
+    @Test func missingTokenThenTokenAttachesTheIndex() async {
         let rig = Rig(token: .missing)
         await rig.start()
         #expect(rig.controller.status.token == .missing && rig.index == nil && rig.setupRequests == 1)
-        #expect(rig.controller.statusLines.contains(AppText.tokenMissing))
+        #expect(rig.controller.statusLines.contains(AppText.de.tokenMissing))
         await rig.command("WWT Relaunch")
-        #expect(rig.phase == .error && rig.model.message == FlowText.noProjectData)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.noProjectData)
         await rig.advance(2)
 
-        rig.tokens.importResult = .failure(.noToken)
-        #expect(await rig.controller.importToken() == false)
-        #expect(rig.controller.status.tokenMessage == "AC-Token fehlt")
+        // The address is still the placeholder: no password goes there.
+        #expect(await rig.controller.login(username: "someone@example.com", password: "not-a-real-password") == false)
+        #expect(rig.controller.status.tokenMessage == AppText.de.addressMissing && rig.tokens.logins.isEmpty)
+        #expect(rig.controller.status.token == .missing && rig.index == nil)
 
-        rig.tokens.importResult = .success(538)
-        #expect(await rig.controller.importToken())
+        #expect(await rig.controller.saveToken("538-testtokenabc"))
         await rig.settle()
         #expect(rig.factory.made.map(\.userId) == [538] && rig.controller.status.token == .present)
         #expect(rig.index?.calls.prefix(2) == ["loadFromDisk", "refreshFast"])
@@ -606,7 +630,7 @@ import Testing
         await rig.listen()
         // No speech for 4 s after the mic is ready: "Ich höre nichts".
         await rig.advance(4.1)
-        #expect(rig.phase == .error && rig.model.message == FlowText.nothingHeard)
+        #expect(rig.phase == .error && rig.model.message == FlowText.de.nothingHeard)
         await rig.advance(FlowTimings().errorHold)
         #expect(rig.phase == .idle)
         // The choices window closes the list after 6 s.
@@ -661,32 +685,32 @@ import Testing
         #expect(rig.controller.status.selfCheckRunning)
         await rig.settle()
         #expect(rig.controller.status.selfCheck?.passed == true)
-        #expect(rig.controller.diagnosticLines.contains(AppText.selfTestPassed(ms: 812)))
+        #expect(rig.controller.diagnosticLines.contains(AppText.de.selfTestPassed(ms: 812)))
 
         rig.controller.runChromeTest()
         await rig.settle()
         #expect(rig.chrome.opened == [Fixture.myTasksURL])
-        #expect(rig.controller.status.chromeTest == AppText.chromeTest(.reused))
+        #expect(rig.controller.status.chromeTest == AppText.de.chromeTest(.reused))
         await rig.advance(0.6)
-        #expect(rig.controller.status.chromeFront == AppText.chromeFront(true))
+        #expect(rig.controller.status.chromeFront == AppText.de.chromeFront(true))
 
         rig.controller.setLaunchAtLogin(true)
         #expect(rig.login.statusValue == .enabled && rig.store.launchAtLogin == [true])
         #expect(rig.controller.menuState().loginItem == .enabled)
         rig.login.error = TestError()
         rig.controller.setLaunchAtLogin(false)
-        #expect(rig.controller.status.loginMessage?.hasPrefix(AppText.loginItemFailed) == true)
+        #expect(rig.controller.status.loginMessage?.hasPrefix(AppText.de.loginItemFailed) == true)
 
         // Not while a command runs: the menu disables the Diagnose commands (review U9), the call does nothing.
         await rig.listen()
         rig.controller.runChromeTest()
         #expect(rig.controller.status.notice == nil && rig.chrome.opened.count == 1)
         guard case .submenu(let diag)? = StatusMenuModel.items(rig.controller.menuState()).first(where: {
-            $0.title == AppText.diagnostics })?.kind else { Issue.record("no Diagnose submenu"); return }
+            $0.title == AppText.de.diagnostics })?.kind else { Issue.record("no Diagnose submenu"); return }
         let commands = diag.filter { if case .command = $0.kind { return true }; return false }
-        #expect(commands.filter(\.enabled).map(\.title) == [AppText.copyDiagnostics])
+        #expect(commands.filter(\.enabled).map(\.title) == [AppText.de.copyDiagnostics])
         // The test results sit in the submenu, not at the top of the menu.
-        #expect(diag.first?.title == AppText.selfTestPassed(ms: 812) && !rig.controller.statusLines.contains(AppText.selfTestPassed(ms: 812)))
+        #expect(diag.first?.title == AppText.de.selfTestPassed(ms: 812) && !rig.controller.statusLines.contains(AppText.de.selfTestPassed(ms: 812)))
     }
 
     @Test func diagnosticsHoldNoTranscriptAndNoToken() async {

@@ -164,6 +164,10 @@ public final class ChromeOpener: ChromeOpening {
         self.now = now
     }
 
+    /// The AC address changed (setup window): tabs on this origin count as AC tabs from now on, for `open`,
+    /// `currentACTabURL` and `activeProjectId`. No restart needed.
+    public func setACBaseURL(_ url: URL) { settings.acBaseURL = url }
+
     /// Waits for the compile step (about 140 ms after launch). false: the script did not compile, every `open` then
     /// uses the NSWorkspace fallback.
     public func prepare() async -> Bool { await runner.prepare() }

@@ -66,10 +66,14 @@ public struct History: Codable, Sendable, Equatable {
     /// particles ("schon", "gleich", "aber", see `particles`).
     /// The query must not contain the project's code or an existing alias: an alias stands in for a code STT
     /// missed, so when the code was heard ("wwt schon"), the leftover is noise.
+    /// `language` is the language of the commands: it picks the tokenizer, the resolver's rules and the particles.
     /// Output keys are codes as written in AC, values sorted; merge it into `Config.aliases`.
-    public func learnedAliases(projects: [ProjectEntry], minPicks: Int = 2) -> [String: [String]] {
+    public func learnedAliases(projects: [ProjectEntry], minPicks: Int = 2, language: AppLanguage = .de) -> [String: [String]] {
         let byId = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let resolver = Resolver(projects: projects)
+        var config = ResolverConfig()
+        config.language = language
+        let resolver = Resolver(projects: projects, config: config)
+        let stop = Self.particles(language)
         let codeKeys = Set(projects.compactMap { $0.code.map(ProjectEntry.codeKey) })
         var aliasOwner: [String: String] = [:]   // existing alias text -> code key
         for p in projects { if let c = p.code { for a in p.aliases { aliasOwner[TextNorm.queryKey(TextNorm.tokenize(a))] = ProjectEntry.codeKey(c) } } }
@@ -84,14 +88,14 @@ public struct History: Codable, Sendable, Equatable {
             let rival = counts.contains { $0.key != pid && $0.value >= n && byId[$0.key].flatMap(\.code).map(ProjectEntry.codeKey) != codeKey }
             if rival { continue }
 
-            let tokens = TextNorm.tokenize(query)
+            let tokens = TextNorm.tokenize(query, language: language)
             // No score at all ("imben" alone): nothing is explained, the whole query is the residue.
             let scored = resolver.score(tokens, within: [pid]).first
             if let hit = scored?.codeHit, hit == .exact || hit == .alias { continue }
             let indexed = resolver.projects.first { $0.id == pid } ?? p   // canonical title keys
             guard let alias = Self.residue(tokens, explained: scored?.got ?? [], project: indexed),
                   !codeKeys.contains(alias), aliasOwner[alias] == nil,
-                  !alias.split(separator: " ").allSatisfy({ Self.particles.contains(String($0)) }) else { continue }
+                  !alias.split(separator: " ").allSatisfy({ stop.contains(String($0)) }) else { continue }
             out[code, default: []].insert(alias)
         }
         return out.mapValues { $0.sorted() }
@@ -101,6 +105,14 @@ public struct History: Codable, Sendable, Equatable {
     static let particles: Set<String> = Parser.softFillers.union([
         "doch", "mal", "denn", "wohl", "nur", "noch", "bitte", "jetzt", "dann", "also", "so", "sehr", "hallo", "hey",
     ])
+
+    /// English adds the everyday words that `Parser.strip` keeps in an English command. It keeps the German set,
+    /// because the history holds the queries of both languages.
+    static let englishParticles: Set<String> = particles.union(Lexicon.en.softFillers).union([
+        "hello", "hi", "hiya", "only", "still", "very", "really", "maybe", "sorry", "oops", "wait",
+    ])
+
+    static func particles(_ language: AppLanguage) -> Set<String> { language == .de ? particles : englishParticles }
 
     /// Unexplained query words; a glued word whose suffix is a title word contributes its prefix.
     static func residue(_ tokens: [Token], explained: Set<Int>, project p: ProjectEntry) -> String? {

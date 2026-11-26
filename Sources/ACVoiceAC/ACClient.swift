@@ -17,10 +17,12 @@ public enum Fetch<T: Sendable>: Sendable {
 
 /// Typed AC errors. Descriptions name paths (ids only), never the token or an ETag.
 public enum ACError: Error, Sendable, Equatable, CustomStringConvertible {
-    /// No token in the Keychain or in ac-mcp.
+    /// No token in the Keychain.
     case noToken
     /// Token rejected (401, or 500 `InvalidTokenException` [V]), also after one renewal.
     case unauthorized
+    /// The sign-in (`ACTokenIssuer`) was refused: wrong e-mail address or password.
+    case credentialsRejected
     case notFound(path: String)
     /// AC answers an unknown API path with 500 "Failed to match '<path>' path." [V].
     case endpointMissing(path: String)
@@ -43,6 +45,7 @@ public enum ACError: Error, Sendable, Equatable, CustomStringConvertible {
         switch self {
         case .noToken: return "no AC token"
         case .unauthorized: return "401 unauthorized"
+        case .credentialsRejected: return "sign-in rejected"
         case .notFound(let p): return "404 \(p)"
         case .endpointMissing(let p): return "endpoint missing: \(p)"
         case .http(let s, let p): return "HTTP \(s) \(p)"
@@ -59,7 +62,9 @@ public enum ACError: Error, Sendable, Equatable, CustomStringConvertible {
     public var userMessage: String {
         switch self {
         case .noToken: return "AC-Token fehlt"
+        // Same text as `FlowText.tokenRejected`: the overlay adds "Melde dich in der Einrichtung neu an" to it.
         case .unauthorized: return "AC lehnt den Token ab"
+        case .credentialsRejected: return "AC lehnt E-Mail oder Passwort ab"
         case .notFound: return "AC kennt diese Seite nicht"
         // Same text as `FlowText.acUnreachable`: the overlay adds "Prüfe die Internetverbindung" to it.
         case .transport: return "AC antwortet nicht"
@@ -109,10 +114,10 @@ public struct ClientStats: Sendable, Equatable {
 /// - Base URL: https with a host only (`Config.isValidBaseURL`). Otherwise every request throws
 ///   `ACError.insecureBaseURL` before the token is loaded: the token never travels in clear text or to a bare path.
 /// - Auth: `X-Angie-AuthApiToken`. When AC rejects the token the client asks its `TokenProvider` for a fresh token
-///   (re-import from ac-mcp), retries once, and then throws `ACError.unauthorized`. AC v8 answers an invalid token
+///   (a token saved meanwhile by a new sign-in), retries once, and then throws `ACError.unauthorized`. AC v8 answers an invalid token
 ///   with **500** `ActiveCollab\Authentication\Exception\InvalidTokenException`; only a missing header gives 401 [V].
 ///   A renewal that found nothing is not permanent: after `renewalCooldown` the next rejection asks the provider
-///   again, and `resetToken()` (token re-imported or pasted) clears the state at once.
+///   again, and `resetToken()` (new sign-in or pasted token) clears the state at once.
 /// - ETags: pass the stored validator, get `.notModified` on 304. Never log ETags (they contain an e-mail address).
 /// - Redirects are never followed (session delegate). The task probe reads the 301 `Location` itself.
 /// - Network work and JSON decoding run off the actor (`@concurrent`); only the token state is isolated.
@@ -372,7 +377,7 @@ public actor ACClient {
     // MARK: - Token state (isolated)
 
     /// Forgets the token and every renewal result: the next request loads the token from the provider again.
-    /// Call it after the token was re-imported from ac-mcp or pasted (`KeychainTokenStore.save`).
+    /// Call it after a new token was saved by a sign-in or a paste (`KeychainTokenStore.save`).
     public func resetToken() {
         generation += 1
         token = nil
@@ -399,7 +404,7 @@ public actor ACClient {
     /// without a new token the same token is not renewed again for `renewalCooldown`.
     func renewToken(rejected: String) async throws -> String? {
         if let token, token != rejected { return token }
-        // After `resetToken()` the provider may already hold a different token (re-import, paste).
+        // After `resetToken()` the provider may already hold a different token (sign-in, paste).
         if token == nil, let current = try? await currentToken(), current != rejected { return current }
         if let r = renewal, r.rejected == rejected { return try await r.task.value }
         if let f = failedRenewal, f.rejected == rejected, ContinuousClock.now - f.at < renewalCooldown { return nil }

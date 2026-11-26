@@ -134,6 +134,43 @@ import Testing
         #expect(Config.decode(Data(json.utf8)).acBaseURL == Config().acBaseURL, "\(url)")
     }
 
+    /// The setup window's address field: https only, a host required, path and trailing slash dropped.
+    @Test func typedAddressIsNormalized() {
+        func n(_ s: String) -> String? { Config.normalizedBaseURL(s)?.absoluteString }
+        #expect(n("https://ac.example.test") == "https://ac.example.test")
+        #expect(n(" https://AC.Example.test/ \n") == "https://ac.example.test")
+        #expect(n("https://ac.example.test/projects/628?x=1#top") == "https://ac.example.test")
+        #expect(n("ac.example.test") == "https://ac.example.test")
+        #expect(n("https://ac.example.test:8443/") == "https://ac.example.test:8443")
+        // The https default port is the same origin as no port.
+        #expect(n("https://ac.example.test:443/projects") == "https://ac.example.test")
+        for bad in ["", "   ", "http://ac.example.test", "ftp://ac.example.test", "https://", "https:///x",
+                    "https://someone:secret@ac.example.test", "https://ac example.test", "file:///etc"] {
+            #expect(n(bad) == nil, "\(bad)")
+        }
+    }
+
+    @Test func placeholderAddress() {
+        #expect(Config().hasPlaceholderBaseURL && Config.placeholderBaseURL.absoluteString == "https://ac.example.com")
+        #expect(Config.decode(Data(#"{"acBaseURL":"https://ac.example.com/"}"#.utf8)).hasPlaceholderBaseURL)
+        #expect(!Config.decode(Data(#"{"acBaseURL":"https://ac.example.test"}"#.utf8)).hasPlaceholderBaseURL)
+        #expect(Config.sameBase(URL(string: "https://AC.example.test/")!, URL(string: "https://ac.example.test")!))
+        #expect(!Config.sameBase(URL(string: "https://ac.example.test")!, URL(string: "https://ac.example.com")!))
+        // Another port is another ActiveCollab, the default port is none.
+        #expect(!Config.sameBase(URL(string: "https://ac.example.test:8443")!, URL(string: "https://ac.example.test")!))
+        #expect(Config.sameBase(URL(string: "https://ac.example.test:443")!, URL(string: "https://ac.example.test")!))
+    }
+
+    /// The token import from a local tool is gone; an old config.json that still names its key decodes as before.
+    @Test func oldTokenImportKeyIsIgnored() {
+        let c = Config.decode(Data(#"{"tokenImportPath":"~/somewhere","earcons":false,"userId":538}"#.utf8))
+        var expected = Config()
+        expected.earcons = false
+        expected.userId = 538
+        #expect(c == expected)
+        #expect(!String(decoding: c.encoded(), as: UTF8.self).contains("tokenImportPath"))
+    }
+
     @Test func otherHTTPSHostIsKept() {
         let c = Config.decode(Data(#"{"acBaseURL":"https://ac.example.de/"}"#.utf8))
         #expect(c.acBaseURL.absoluteString == "https://ac.example.de/")

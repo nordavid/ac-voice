@@ -13,55 +13,85 @@ public enum SpeechSelfCheck {
         /// Best text of DictationTranscriber, else SpeechTranscriber.
         public var transcript: String
         public var elapsedMs: Double
-        /// Short German status line for the onboarding window.
+        /// Short status line for the onboarding window, in the language of the check.
         public var message: String
     }
 
+    /// The German test phrase (`phrase(_:)`).
     public static let defaultPhrase = "Öffne das Projekt"
 
-    /// Synthesizes `phrase` with a German system voice into memory (nothing is played) and transcribes it.
-    /// `timeout` bounds the whole call, synthesis included: a stalled analyzer is killed at the deadline.
-    public static func run(phrase: String = defaultPhrase, locale: Locale = Locale(identifier: "de_DE"),
+    /// The test phrase per language: a command the parser knows, spoken by a system voice of that language.
+    public static func phrase(_ language: AppLanguage) -> String {
+        language == .de ? defaultPhrase : "Open the project"
+    }
+
+    /// Synthesizes `phrase` (nil: `phrase(language)`) with a system voice of `language` into memory (nothing is
+    /// played) and transcribes it with `language.speechLocale` (or `locale`). `timeout` bounds the whole call,
+    /// synthesis included: a stalled analyzer is killed at the deadline.
+    public static func run(phrase: String? = nil, language: AppLanguage = .de, locale: Locale? = nil,
                            timeout: Double = 15) async -> Report {
         let t0 = uptime()
-        guard let clip = await synthesize(phrase, language: "de-DE", timeout: timeout) else {
-            return Report(passed: false, transcript: "", elapsedMs: (uptime() - t0) * 1000, message: "Installiere eine deutsche Systemstimme")
+        let text = phrase ?? Self.phrase(language)
+        guard let clip = await synthesize(text, language: language.bcp47, timeout: timeout) else {
+            return Report(passed: false, transcript: "", elapsedMs: (uptime() - t0) * 1000,
+                          message: Status.noVoice.in(language))
         }
-        return await run(buffer: clip, expecting: words(phrase), locale: locale, timeout: timeout, started: t0)
+        return await run(buffer: clip, expecting: words(text, language), locale: locale ?? language.speechLocale,
+                         language: language, timeout: timeout, started: t0)
     }
 
     /// Transcribes an audio file, e.g. a clip bundled with the app. `expecting` are words the transcript must
     /// contain (at least half of them, compared case- and accent-insensitively). `timeout` bounds the whole call.
-    public static func run(clip: URL, expecting: [String], locale: Locale = Locale(identifier: "de_DE"),
+    public static func run(clip: URL, expecting: [String], language: AppLanguage = .de, locale: Locale? = nil,
                            timeout: Double = 15) async -> Report {
         let t0 = uptime()
         guard let file = try? AVAudioFile(forReading: clip),
               let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(max(file.length, 1))),
               (try? file.read(into: buffer)) != nil else {
-            return Report(passed: false, transcript: "", elapsedMs: 0, message: SpeechError.invalidAudio("").message)
+            return Report(passed: false, transcript: "", elapsedMs: 0, message: SpeechError.invalidAudio("").message(language))
         }
-        return await run(buffer: buffer, expecting: expecting.map(TextNorm.fold), locale: locale, timeout: timeout, started: t0)
+        return await run(buffer: buffer, expecting: expecting.map { TextNorm.fold($0, language: language) },
+                         locale: locale ?? language.speechLocale, language: language, timeout: timeout, started: t0)
     }
 
-    static func run(buffer: AVAudioPCMBuffer, expecting: [String], locale: Locale, timeout: Double, started t0: Double) async -> Report {
+    static func run(buffer: AVAudioPCMBuffer, expecting: [String], locale: Locale, language: AppLanguage = .de,
+                    timeout: Double, started t0: Double) async -> Report {
         let text: String
         do {
             let left = max(0.05, timeout - (uptime() - t0))
             text = try await transcribe(SendableBuffer(buffer), locale: locale, timeout: left)
         } catch let e as SpeechError {
-            return Report(passed: false, transcript: "", elapsedMs: (uptime() - t0) * 1000, message: e.message)
+            return Report(passed: false, transcript: "", elapsedMs: (uptime() - t0) * 1000, message: e.message(language))
         } catch {
-            return Report(passed: false, transcript: "", elapsedMs: (uptime() - t0) * 1000, message: "Spracherkennung antwortet nicht")
+            return Report(passed: false, transcript: "", elapsedMs: (uptime() - t0) * 1000, message: Status.noAnswer.in(language))
         }
-        let heard = Set(words(text))
+        let heard = Set(words(text, language))
         let hits = expecting.filter(heard.contains).count
         let passed = !text.isEmpty && hits * 2 >= expecting.count
-        let message = passed ? "Spracherkennung bereit" : (text.isEmpty ? "Spracherkennung liefert keinen Text" : "Spracherkennung versteht den Testsatz nicht")
-        return Report(passed: passed, transcript: text, elapsedMs: (uptime() - t0) * 1000, message: message)
+        let message = passed ? Status.ready : (text.isEmpty ? Status.noText : Status.notUnderstood)
+        return Report(passed: passed, transcript: text, elapsedMs: (uptime() - t0) * 1000, message: message.in(language))
+    }
+
+    /// Status lines of the self-check.
+    enum Status {
+        case noVoice, noAnswer, ready, noText, notUnderstood
+
+        func `in`(_ language: AppLanguage) -> String {
+            let de = language == .de
+            switch self {
+            case .noVoice: return de ? "Installiere eine deutsche Systemstimme" : "Install an English system voice"
+            case .noAnswer: return de ? "Spracherkennung antwortet nicht" : "Speech recognition is not responding"
+            case .ready: return de ? "Spracherkennung bereit" : "Speech recognition ready"
+            case .noText: return de ? "Spracherkennung liefert keinen Text" : "Speech recognition returns no text"
+            case .notUnderstood: return de ? "Spracherkennung versteht den Testsatz nicht" : "Speech recognition does not understand the test phrase"
+            }
+        }
     }
 
     /// Folded word keys, as the resolver compares them.
-    static func words(_ s: String) -> [String] { TextNorm.tokenize(s).map(\.key).filter { !$0.isEmpty } }
+    static func words(_ s: String, _ language: AppLanguage = .de) -> [String] {
+        TextNorm.tokenize(s, language: language).map(\.key).filter { !$0.isEmpty }
+    }
 
     /// One analyzer, both transcribers, whole clip with room noise around it, then finish. Returns at the deadline
     /// even when the analyzer stalls (`finalize` ignores task cancellation, REVIEW M2): the analyzer is then

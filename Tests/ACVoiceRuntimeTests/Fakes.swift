@@ -116,8 +116,12 @@ final class FakeSpeech: SpeechServing {
         running = false
     }
 
-    func selfCheck() async -> SelfCheckResult {
+    /// The language of every self-check, in order.
+    var selfCheckLanguages: [AppLanguage] = []
+
+    func selfCheck(language: AppLanguage) async -> SelfCheckResult {
         calls.append("selfCheck")
+        selfCheckLanguages.append(language)
         return selfCheckResult
     }
 
@@ -222,29 +226,59 @@ final class FakeIndex: IndexServing {
     func count(_ call: String) -> Int { calls.filter { $0 == call }.count }
 }
 
+/// The Keychain as one stored token per AC host, and an AC that issues tokens on sign-in. Never keeps a password.
 @MainActor
 final class FakeTokens: TokenServing {
-    var stored: StoredToken
-    var importResult: Result<Int?, ACError> = .success(538)
-    var imports = 0
-    /// Saved token values (test tokens only).
+    /// The Keychain account the rig starts with.
+    let account: String
+    /// Tokens per Keychain account (`KeychainTokenStore.account(for:)`, as the live store keys them: host and a
+    /// non-default port).
+    var byAccount: [String: StoredToken]
+    /// What AC answers to a sign-in: the issued token (a test value) or an error.
+    var loginResult: Result<String, ACError> = .success("538-IssuedTestTokenAbc")
+    /// Sign-ins as AC saw them: address and e-mail only, never the password.
+    var logins: [(base: URL, username: String)] = []
+    /// Whether each sign-in carried a non-empty password.
+    var loginHadPassword: [Bool] = []
+    /// Saved token values (test tokens only) and the Keychain accounts they were saved for.
     var saved: [String] = []
+    var savedAccounts: [String] = []
+    /// Keychain reads, by address.
+    var reads: [URL] = []
+    /// What a token save throws (a malformed paste, a Keychain error); nil saves.
+    var saveError: ACError?
 
-    init(_ stored: StoredToken) { self.stored = stored }
+    init(_ stored: StoredToken, account: String) {
+        self.account = account
+        byAccount = [account: stored]
+    }
 
-    func stored() async -> StoredToken { stored }
+    /// The token of the rig's starting account.
+    var stored: StoredToken {
+        get { byAccount[account] ?? .missing }
+        set { byAccount[account] = newValue }
+    }
 
-    func importFromACMCP() async throws -> Int? {
-        imports += 1
-        let hint = try importResult.get()
-        stored = .present(userId: hint)
+    func stored(for base: URL) async -> StoredToken {
+        reads.append(base)
+        return byAccount[KeychainTokenStore.account(for: base)] ?? .missing
+    }
+
+    func login(base: URL, username: String, password: String) async throws -> Int? {
+        logins.append((base, username))
+        loginHadPassword.append(!password.isEmpty)
+        let token = try loginResult.get()
+        let hint = ACToken.userId(from: token)
+        byAccount[KeychainTokenStore.account(for: base)] = .present(userId: hint)
         return hint
     }
 
-    func save(_ token: String) async throws -> Int? {
+    func save(_ token: String, for base: URL) async throws -> Int? {
+        if let saveError { throw saveError }
         saved.append(token)
-        let hint = ACMCPTokenImporter.userId(fromToken: token)
-        stored = .present(userId: hint)
+        savedAccounts.append(KeychainTokenStore.account(for: base))
+        let hint = ACToken.userId(from: token)
+        byAccount[KeychainTokenStore.account(for: base)] = .present(userId: hint)
         return hint
     }
 }
@@ -355,6 +389,10 @@ final class FakeChrome: ChromeService {
     var automation: AutomationStatus = .granted
     var tabQueries = 0
     var lastActivation: (strategy: ActivationStrategy, frontmost: Bool)?
+    /// Every AC address the controller handed over after an address change.
+    var bases: [URL] = []
+
+    func setACBaseURL(_ url: URL) { bases.append(url) }
 
     func open(_ url: URL) async throws -> OpenResult {
         opened.append(url)
@@ -457,6 +495,8 @@ final class FakeStore: Persisting {
     var history: History
     var savedHistories: [History] = []
     var launchAtLogin: [Bool] = []
+    /// `saveACBaseURL` calls: the only key an address change writes.
+    var baseURLs: [URL] = []
     var flushes = 0
 
     init(config: Config, history: History = History()) {
@@ -468,6 +508,7 @@ final class FakeStore: Persisting {
     func loadHistory() -> History { history }
     func save(_ history: History) { savedHistories.append(history) }
     func saveLaunchAtLogin(_ enabled: Bool) { launchAtLogin.append(enabled) }
+    func saveACBaseURL(_ url: URL) { baseURLs.append(url) }
     func flush() { flushes += 1 }
 }
 

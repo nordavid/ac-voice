@@ -149,7 +149,7 @@ final class StreamConverter {
     }
 }
 
-/// Errors with a short German message for the overlay.
+/// Errors with a short message for the overlay and the self-check (`message(_:)`).
 public enum SpeechError: Error, Sendable, Equatable {
     case assetsUnavailable
     case analyzerFailed(String)
@@ -157,13 +157,17 @@ public enum SpeechError: Error, Sendable, Equatable {
     case invalidInputFormat
     case invalidAudio(String)
 
-    public var message: String {
+    /// The German message (`message(.de)`).
+    public var message: String { message(.de) }
+
+    public func message(_ language: AppLanguage) -> String {
+        let de = language == .de
         switch self {
-        case .assetsUnavailable: return "Sprachmodell nicht verfügbar"
-        case .analyzerFailed: return "Spracherkennung fehlgeschlagen"
-        case .sourceFailed: return "Mikrofon nicht verfügbar"
-        case .invalidInputFormat: return "Mikrofon liefert kein Audio"
-        case .invalidAudio: return "Audiodatei nicht lesbar"
+        case .assetsUnavailable: return de ? "Sprachmodell nicht verfügbar" : "Speech model not available"
+        case .analyzerFailed: return de ? "Spracherkennung fehlgeschlagen" : "Speech recognition failed"
+        case .sourceFailed: return de ? "Mikrofon nicht verfügbar" : "Microphone not available"
+        case .invalidInputFormat: return de ? "Mikrofon liefert kein Audio" : "Microphone delivers no audio"
+        case .invalidAudio: return de ? "Audiodatei nicht lesbar" : "Cannot read the audio file"
         }
     }
 

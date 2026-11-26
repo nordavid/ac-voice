@@ -6,6 +6,8 @@ struct ChoiceListView: View {
     var footer: ChoiceFooterState?
     var palette: OverlayPalette
     var interactive: Bool
+    /// The overlay's words in the app language (VoiceOver hints, page label).
+    var text: OverlayText = .de
     var onChoose: @MainActor (ChoiceRowState) -> Void
 
     @Environment(\.overlayAccessibility) private var a11y
@@ -21,7 +23,7 @@ struct ChoiceListView: View {
             }
             VStack(spacing: 2) {
                 ForEach(rows) { row in
-                    ChoiceRowView(row: row, palette: palette, interactive: interactive, onChoose: onChoose)
+                    ChoiceRowView(row: row, palette: palette, interactive: interactive, text: text, onChoose: onChoose)
                         .transition(Self.rowTransition(index: row.index, reduceMotion: a11y.reduceMotion))
                 }
             }
@@ -30,7 +32,7 @@ struct ChoiceListView: View {
             if let footer {
                 // Leading 17 = list padding 8 + row padding 9: the icon sits under the numeral pills, the hint
                 // under the row titles.
-                ChoiceFooterView(footer: footer, palette: palette)
+                ChoiceFooterView(footer: footer, palette: palette, text: text)
                     .padding(.leading, 17)
                     .padding(.trailing, 18)
                     .padding(.top, 6)
@@ -62,6 +64,7 @@ struct ChoiceRowView: View {
     var row: ChoiceRowState
     var palette: OverlayPalette
     var interactive: Bool
+    var text: OverlayText = .de
     var onChoose: @MainActor (ChoiceRowState) -> Void
 
     @Environment(\.overlayAccessibility) private var a11y
@@ -115,7 +118,7 @@ struct ChoiceRowView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)
-        .accessibilityHint(OverlayText.a11yOpenRow)
+        .accessibilityHint(text.a11yOpenRow)
         .accessibilityAddTraits(.isButton)
     }
 
@@ -209,6 +212,7 @@ struct MarkerIcon: View {
 struct ChoiceFooterView: View {
     var footer: ChoiceFooterState
     var palette: OverlayPalette
+    var text: OverlayText = .de
     @Environment(\.overlayAccessibility) private var a11y
 
     var body: some View {
@@ -234,7 +238,7 @@ struct ChoiceFooterView: View {
             if footer.pageCount > 1 {
                 PageDots(page: footer.page, count: footer.pageCount, accent: accent)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(OverlayText.a11yPage(footer.page + 1, of: footer.pageCount))
+                    .accessibilityLabel(text.a11yPage(footer.page + 1, of: footer.pageCount))
                 if let more = footer.moreText {
                     Text(more)
                         .font(.system(size: 12.5, weight: .medium))

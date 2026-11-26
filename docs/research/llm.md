@@ -251,6 +251,6 @@ Build all of them with `swiftc -O -swift-version 6 …`.
 
 **Compliance:**
 - AC access was a single GET on `/api/v1/projects`.
-- Nothing in ac-mcp or any other local project was modified.
+- No other local project was modified.
 - No apps were opened, no settings changed, and no permission dialogs appeared.
 - Every command ran under an `alarm` timeout, and none timed out.

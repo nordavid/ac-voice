@@ -1,0 +1,10 @@
+{
+	"Name": "AC Voice",
+	"Description": "Sprachsteuerung für ActiveCollab. Tippe auf die Taste und sprich. AC Voice öffnet Projekte, Tickets und deine Aufgaben in Chrome.",
+	"Category": "AC Voice",
+	"io.github.nordavid.acvoice.streamdeck.voice": {
+		"Name": "AC Voice",
+		"Tooltip": "Tippe und sprich. Oder halte die Taste beim Sprechen."
+	},
+	"Localization": {}
+}

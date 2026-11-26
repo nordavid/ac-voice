@@ -312,7 +312,11 @@ public struct FlowEnv: Sendable {
     public var config: Config
     /// Project of the active Chrome AC tab (`Routes.projectId(in:base:)`), when known.
     public var activeProjectId: Int?
-    public init(interpreter: Interpreter, index: TaskIndex = .init(), config: Config = .init(), activeProjectId: Int? = nil) {
+    /// Language of the texts and the voice commands, resolved once at launch (`Config.appLanguage`).
+    public var language: AppLanguage
+    public init(interpreter: Interpreter, index: TaskIndex = .init(), config: Config = .init(), activeProjectId: Int? = nil,
+                language: AppLanguage = .de) {
         self.interpreter = interpreter; self.index = index; self.config = config; self.activeProjectId = activeProjectId
+        self.language = language
     }
 }

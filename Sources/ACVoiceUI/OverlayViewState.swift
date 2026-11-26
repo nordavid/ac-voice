@@ -80,12 +80,12 @@ public enum RowMarker: String, Sendable, CaseIterable {
         }
     }
 
-    public var accessibilityLabel: String {
+    public func accessibilityLabel(_ text: OverlayText) -> String {
         switch self {
-        case .favorite: return OverlayText.a11yFavorite
-        case .mine: return OverlayText.a11yMine
-        case .recent: return OverlayText.a11yRecent
-        case .completed: return OverlayText.a11yCompleted
+        case .favorite: return text.a11yFavorite
+        case .mine: return text.a11yMine
+        case .recent: return text.a11yRecent
+        case .completed: return text.a11yCompleted
         }
     }
 }
@@ -133,11 +133,14 @@ public struct ChoiceFooterState: Sendable, Equatable {
     public var isLastPage: Bool
     /// Ticket rows ("weitere Tickets").
     public var tickets: Bool
+    /// Language of the footer texts (`OverlayModel.language`).
+    public var language: AppLanguage = .de
 
     /// The "mehr" text, nil without paging.
     public var moreText: String? {
         guard pageCount > 1 else { return nil }
-        return isLastPage ? OverlayText.moreFromStart : OverlayText.more(nextCount, tickets: tickets)
+        let text = OverlayText(language)
+        return isLastPage ? text.moreFromStart : text.more(nextCount, tickets: tickets)
     }
 }
 
@@ -159,6 +162,11 @@ public struct OverlayViewState: Sendable, Equatable {
     public var deadline: Date?
     /// The pointer holds the list: the ring stands still with this many seconds left.
     public var countdownFrozen: Double?
+    /// Language of the overlay's own words and its VoiceOver labels (`OverlayModel.language`).
+    public var language: AppLanguage
+
+    /// The overlay's own words in `language`.
+    public var text: OverlayText { OverlayText(language) }
 
     /// The state shown before the first render.
     public static let initial = OverlayViewState(model: OverlayModel(), phaseStart: Date(timeIntervalSince1970: 0))
@@ -168,6 +176,9 @@ public struct OverlayViewState: Sendable, Equatable {
     public init(model m: OverlayModel, phaseStart: Date? = nil) {
         seq = m.seq
         phase = m.phase
+        language = m.language
+        let text = OverlayText(m.language)
+        let flowText = FlowText(m.language)
         self.phaseStart = phaseStart ?? m.since
         rows = []
         footer = nil
@@ -187,12 +198,12 @@ public struct OverlayViewState: Sendable, Equatable {
             micLive = m.micReady && m.phase != .idle
             // Before the first audio arrives, "Ich höre zu" would invite speech the mic cannot hear yet (PLAN 7).
             headline = transcriptHeadline
-                ?? .placeholder(m.micReady ? OverlayText.listening : OverlayText.micStarting, dimmed: false)
+                ?? .placeholder(m.micReady ? text.listening : text.micStarting, dimmed: false)
             if let preview { lines.append(OverlayLine(.preview, preview, symbol: "arrow.right")) }
             if let message {
                 if m.phase == .retry {
                     lines.append(OverlayLine(.alert, message, symbol: "arrow.counterclockwise"))
-                } else if message == FlowText.loadingModel {
+                } else if message == flowText.loadingModel {
                     lines.append(OverlayLine(.status, message, symbol: "arrow.down.circle"))
                 } else {
                     lines.append(OverlayLine(.status, message))
@@ -201,7 +212,7 @@ public struct OverlayViewState: Sendable, Equatable {
 
         case .processing:
             tone = .processing
-            headline = transcriptHeadline ?? preview.map(OverlayHeadline.title) ?? .placeholder(OverlayText.working, dimmed: false)
+            headline = transcriptHeadline ?? preview.map(OverlayHeadline.title) ?? .placeholder(text.working, dimmed: false)
             if let preview, transcriptHeadline != nil {
                 lines.append(OverlayLine(.preview, preview, symbol: "arrow.right"))
             }
@@ -210,8 +221,8 @@ public struct OverlayViewState: Sendable, Equatable {
         case .opening:
             // The target takes the headline now and keeps it through success: only the line under it changes.
             tone = .processing
-            headline = preview.map(OverlayHeadline.title) ?? transcriptHeadline ?? .placeholder(OverlayText.working, dimmed: false)
-            lines.append(OverlayLine(.status, OverlayText.openingInChrome, symbol: "arrow.up.forward"))
+            headline = preview.map(OverlayHeadline.title) ?? transcriptHeadline ?? .placeholder(text.working, dimmed: false)
+            lines.append(OverlayLine(.status, text.openingInChrome, symbol: "arrow.up.forward"))
             if let message { lines.append(OverlayLine(.alert, message, symbol: "exclamationmark.triangle")) }
 
         case .choices:
@@ -224,8 +235,8 @@ public struct OverlayViewState: Sendable, Equatable {
             // One ticket number in several projects (the usual case): say it once in the question, not per row.
             let sharedNumber: Int? = tickets && Set(numbers).count == 1 ? numbers.first.flatMap { $0 } : nil
             let count = max(m.total, m.choices.count)
-            let question = sharedNumber.map { OverlayText.ticketQuestion($0, count: count) }
-                ?? OverlayText.question(count: count, tickets: tickets)
+            let question = sharedNumber.map { text.ticketQuestion($0, count: count) }
+                ?? text.question(count: count, tickets: tickets)
             if let transcriptHeadline {
                 headline = transcriptHeadline
                 lines.append(OverlayLine(.question, question))
@@ -235,31 +246,31 @@ public struct OverlayViewState: Sendable, Equatable {
             if let message { lines.append(OverlayLine(.status, message)) }
             let query = heard.text
             rows = m.choices.enumerated().map { i, item in
-                var row = Self.row(item, index: i, seq: m.seq, query: query)
+                var row = Self.row(item, index: i, seq: m.seq, query: query, text: text)
                 if sharedNumber != nil { row.ticket = nil }
                 return row
             }
             // While the user answers, the footer shows what the speech layer hears; the headline keeps the command.
-            let live = m.answer.isEmpty ? nil : OverlayText.quoted(m.answer.text)
+            let live = m.answer.isEmpty ? nil : text.quoted(m.answer.text)
             footer = ChoiceFooterState(
-                hint: live ?? hint ?? (m.choices.count == 1 ? FlowText.sayYesOrOne : OverlayText.defaultChoiceHint),
+                hint: live ?? hint ?? (m.choices.count == 1 ? flowText.sayYesOrOne : text.defaultChoiceHint),
                 hintIsAlert: live == nil && m.hintIsAlert, hintIsLive: live != nil,
                 page: m.page, pageCount: max(1, m.pageCount), nextCount: m.nextPageCount, isLastPage: m.isLastPage,
-                tickets: tickets)
+                tickets: tickets, language: m.language)
             deadline = m.deadline
             countdownFrozen = m.countdownFrozen
 
         case .success:
             tone = .success
-            let title = message ?? preview ?? OverlayText.opened
+            let title = message ?? preview ?? text.opened
             headline = .title(title)
-            if title != OverlayText.opened { lines.append(OverlayLine(.success, OverlayText.opened)) }
+            if title != text.opened { lines.append(OverlayLine(.success, text.opened)) }
             if let hint { lines.append(OverlayLine(.alert, hint, symbol: "exclamationmark.triangle")) }
 
         case .error:
             tone = .error
-            headline = .title(message ?? OverlayText.a11yError)
-            if !heard.isEmpty { lines.append(OverlayLine(.quote, OverlayText.quoted(heard.text))) }
+            headline = .title(message ?? text.a11yError)
+            if !heard.isEmpty { lines.append(OverlayLine(.quote, text.quoted(heard.text))) }
             if let hint { lines.append(OverlayLine(.alert, hint, symbol: "exclamationmark.triangle")) }
         }
         self.lines = lines
@@ -269,19 +280,19 @@ public struct OverlayViewState: Sendable, Equatable {
 
     /// What VoiceOver reads for the header.
     public var accessibilityLabel: String {
-        var parts = [Self.toneLabel(tone), headline.text]
+        var parts = [Self.toneLabel(tone, text), headline.text]
         parts += lines.map(\.text)
         return parts.filter { !$0.isEmpty }.joined(separator: ". ")
     }
 
-    public static func toneLabel(_ tone: OverlayTone) -> String {
+    public static func toneLabel(_ tone: OverlayTone, _ text: OverlayText) -> String {
         switch tone {
-        case .listening: return OverlayText.a11yListening
-        case .warming: return OverlayText.a11yWarming
-        case .processing: return OverlayText.a11yProcessing
-        case .choices: return OverlayText.a11yChoices
-        case .success: return OverlayText.a11ySuccess
-        case .error: return OverlayText.a11yError
+        case .listening: return text.a11yListening
+        case .warming: return text.a11yWarming
+        case .processing: return text.a11yProcessing
+        case .choices: return text.a11yChoices
+        case .success: return text.a11ySuccess
+        case .error: return text.a11yError
         }
     }
 
@@ -309,7 +320,7 @@ public struct OverlayViewState: Sendable, Equatable {
 
     // MARK: Rows
 
-    static func row(_ item: ChoiceItem, index: Int, seq: Int, query: String) -> ChoiceRowState {
+    static func row(_ item: ChoiceItem, index: Int, seq: Int, query: String, text: OverlayText = .de) -> ChoiceRowState {
         let title = item.title.trimmingCharacters(in: .whitespaces).isEmpty ? item.displayName : item.title
         let badgeParts = [item.code, item.type].compactMap { Self.nonEmpty($0) }
         // A long code ("Hollenstein Optical") would take the title's width: the badge is secondary information.
@@ -323,7 +334,7 @@ public struct OverlayViewState: Sendable, Equatable {
             id = "p\(pid)-\(item.n)"
         case let .task(_, taskId, number):
             ticketNumber = number > 0 ? number : taskId
-            ticket = ticketNumber.map(OverlayText.ticketNumber)
+            ticket = ticketNumber.map(text.ticketNumber)
             id = "t\(taskId)-\(item.n)"
         }
         let markers = RowMarker.allCases.filter { marker in
@@ -336,9 +347,10 @@ public struct OverlayViewState: Sendable, Equatable {
         }
         var label = ["\(item.n)", title]
         if !badgeParts.isEmpty { label.append(badgeParts.joined(separator: " ")) }
-        if let ticketNumber { label.append(OverlayText.a11yTicket(ticketNumber)) }
-        label += markers.map(\.accessibilityLabel)
-        return ChoiceRowState(n: item.n, seq: seq, title: title, titleRuns: TitleHighlighter.runs(title, query: query),
+        if let ticketNumber { label.append(text.a11yTicket(ticketNumber)) }
+        label += markers.map { $0.accessibilityLabel(text) }
+        return ChoiceRowState(n: item.n, seq: seq, title: title,
+                              titleRuns: TitleHighlighter.runs(title, query: query, language: text.language),
                               badge: badge, ticket: ticket, markers: markers, index: index, id: id,
                               accessibilityLabel: label.joined(separator: ", "))
     }
@@ -388,17 +400,25 @@ public struct OverlayViewState: Sendable, Equatable {
 /// Marks title words the user said, so a row shows why it matched ("WWT Website" -> **Website** Relaunch).
 /// Cosmetic only: exact word, a shared prefix of at least 4 letters, or one typo in words of 5 letters or more.
 public enum TitleHighlighter {
-    /// Query words that never highlight: fillers, verbs, articles.
-    static let ignored: Set<String> = [
-        "und", "von", "vom", "der", "die", "das", "den", "dem", "des", "mit", "fur", "auf", "bei", "ins", "zum", "zur",
-        "projekt", "projekte", "ticket", "tickets", "offne", "oeffne", "offnen", "zeige", "zeig", "bitte", "mal",
-        "meine", "mein", "nummer", "eins", "zwei", "drei", "vier", "funf", "sechs", "mehr", "nein", "doch",
+    /// Query words that never highlight: fillers, verbs, articles, command and answer words of each language.
+    static let ignored: [AppLanguage: Set<String>] = [
+        .de: [
+            "und", "von", "vom", "der", "die", "das", "den", "dem", "des", "mit", "fur", "auf", "bei", "ins", "zum", "zur",
+            "projekt", "projekte", "ticket", "tickets", "offne", "oeffne", "offnen", "zeige", "zeig", "bitte", "mal",
+            "meine", "mein", "nummer", "eins", "zwei", "drei", "vier", "funf", "sechs", "mehr", "nein", "doch",
+        ],
+        .en: [
+            "and", "the", "for", "with", "from", "into", "open", "show", "please", "project", "projects", "ticket",
+            "tickets", "task", "tasks", "number", "one", "two", "three", "four", "five", "six", "more", "yes",
+            "cancel", "first", "second", "third", "fourth", "fifth", "sixth",
+        ],
     ]
 
-    public static func runs(_ title: String, query: String) -> [TitleRun] {
+    public static func runs(_ title: String, query: String, language: AppLanguage = .de) -> [TitleRun] {
+        let skip = ignored[language] ?? []
         let queryKeys = Set(words(query).compactMap { w -> String? in
             let k = key(w.text)
-            return w.isWord && k.count >= 3 && !ignored.contains(k) ? k : nil
+            return w.isWord && k.count >= 3 && !skip.contains(k) ? k : nil
         })
         var out: [TitleRun] = []
         for piece in words(title) {

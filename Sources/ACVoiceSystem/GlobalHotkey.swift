@@ -15,13 +15,18 @@ public enum HotkeyError: Error, Equatable {
     /// `eventHotKeyExistsErr` (-9878): another app owns the combination.
     case registrationFailed(Int32)
 
-    /// German text for the menu.
-    public var message: String {
+    /// Text for the menu in the app language.
+    public func message(_ language: AppLanguage) -> String {
+        let de = language == .de
         switch self {
-        case .invalid: return "Das Tastenkürzel passt nicht. Ändere hotkey in config.json."
+        case .invalid:
+            return de ? "Das Tastenkürzel passt nicht. Ändere hotkey in config.json."
+                : "The shortcut does not work. Change hotkey in config.json."
         case .registrationFailed(let s) where s == Int32(eventHotKeyExistsErr):
-            return "Eine andere App nutzt das Tastenkürzel. Ändere hotkey in config.json."
-        case .handlerInstallFailed, .registrationFailed: return "macOS meldet das Tastenkürzel nicht an"
+            return de ? "Eine andere App nutzt das Tastenkürzel. Ändere hotkey in config.json."
+                : "Another app uses the shortcut. Change hotkey in config.json."
+        case .handlerInstallFailed, .registrationFailed:
+            return de ? "macOS meldet das Tastenkürzel nicht an" : "macOS does not register the shortcut"
         }
     }
 }

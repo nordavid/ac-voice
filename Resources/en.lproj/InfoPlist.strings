@@ -1,0 +1,4 @@
+/* macOS permission prompts in English. macOS picks the lproj by the system language, not by config.json "language". */
+"NSMicrophoneUsageDescription" = "AC Voice listens only after you press its key or shortcut. Speech recognition runs entirely on this Mac.";
+"NSSpeechRecognitionUsageDescription" = "AC Voice recognizes your voice command on this Mac. No recording leaves the device.";
+"NSAppleEventsUsageDescription" = "AC Voice opens projects and tickets in Google Chrome. It uses an open ActiveCollab tab or opens a new tab.";

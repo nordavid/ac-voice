@@ -72,7 +72,10 @@ public struct ResolverConfig: Sendable {
         "wartung": ["maintenance"], "pflege": ["maintenance"], "webseite": ["website"], "homepage": ["website"],
         "internetseite": ["website"],
     ]
-    public var typeSynonyms: [String: String] = ["intern": "int", "interne": "int", "agile": "agil", "support": "sla"]
+    public var typeSynonyms: [String: String] = ["intern": "int", "interne": "int", "internal": "int", "agile": "agil", "support": "sla"]
+    /// Language of the spoken queries: picks the phonetic key (Koelner Phonetik or `Fuzzy.metaphone`) and the number
+    /// words ("funfundvierzig" or "forty five" = "45"). `Interpreter` keeps it in line with its own language.
+    public var language: AppLanguage = .de
     public init() {}
 
     /// Defaults plus `extra` (`Config.synonyms`); the words of both lists count for a shared key.
@@ -159,6 +162,7 @@ public struct Resolver: Sendable {
             for e in entries.indices {
                 entries[e].titleKeys = entries[e].titleKeys.map { map[$0] ?? $0 }
                 entries[e].titleCologne = entries[e].titleKeys.map(Fuzzy.cologne)
+                entries[e].titleMetaphone = entries[e].titleKeys.map(Fuzzy.metaphone)
             }
         }
         return (entries, map)
@@ -169,21 +173,35 @@ public struct Resolver: Sendable {
     /// Canonical title spellings and glued tokens split at a known code or alias prefix (REVIEW m8):
     /// "qzcrm" (from "Q Z C R M") -> "qz crm", "ebenbetreuung" with alias "eben" -> "eben betreuung".
     /// Splits only unknown tokens whose remainder is an exact title or code word.
-    /// `origin[i]` is the index of the caller's token that prepared token `i` came from.
-    func prepare(_ q: [Token]) -> (tokens: [Token], origin: [Int]) {
-        var out: [Token] = [], origin: [Int] = []
-        for (i, t) in q.enumerated() {
-            let k = t.key
-            if let c = canonical[k] { out.append(Token(text: c)); origin.append(i); continue }
+    /// English: a number of several words is one word ("forty five" -> "45"), as German glues it ("funfundvierzig").
+    /// `origin[i]` are the indices of the caller's tokens that prepared token `i` came from.
+    func prepare(_ q: [Token]) -> (tokens: [Token], origin: [[Int]]) {
+        var out: [Token] = [], origin: [[Int]] = []
+        var numbers: [Int: (end: Int, value: Int)] = [:]
+        if config.language == .en {
+            for run in Parser.numeralRuns(q, .en) where run.range.count > 1 {
+                numbers[run.range.lowerBound] = (run.range.upperBound, run.value)
+            }
+        }
+        var i = 0
+        while i < q.count {
+            defer { i += 1 }
+            if let n = numbers[i] {
+                out.append(Token(text: String(n.value))); origin.append(Array(i..<n.end))
+                i = n.end - 1
+                continue
+            }
+            let t = q[i], k = t.key
+            if let c = canonical[k] { out.append(Token(text: c)); origin.append([i]); continue }
             if k.count >= 4, !knownKeys.contains(k), !k.allSatisfy(\.isNumber),
                let p = splitPrefixes.first(where: { k.hasPrefix($0) && k.count - $0.count >= 2
                    && (titleKeySet.contains(String(k.dropFirst($0.count))) || codeWordKeys.contains(String(k.dropFirst($0.count)))) }) {
                 let rest = String(k.dropFirst(p.count))
-                out.append(Token(text: p, isAcronym: t.isAcronym)); origin.append(i)
-                out.append(Token(text: canonical[rest] ?? rest, isAcronym: t.isAcronym && rest.count <= 4)); origin.append(i)
+                out.append(Token(text: p, isAcronym: t.isAcronym)); origin.append([i])
+                out.append(Token(text: canonical[rest] ?? rest, isAcronym: t.isAcronym && rest.count <= 4)); origin.append([i])
                 continue
             }
-            out.append(t); origin.append(i)
+            out.append(t); origin.append([i])
         }
         return (out, origin)
     }
@@ -194,7 +212,7 @@ public struct Resolver: Sendable {
     public func score(_ q: [Token], within: Set<Int>? = nil, now: Date = .now) -> [Scored] {
         guard !q.isEmpty else { return [] }
         let (pq, origin) = prepare(q)
-        let prepared = Prepared(pq)
+        let prepared = Prepared(pq, language: config.language)
         var all = projects.filter { within?.contains($0.id) ?? true }.map { score(prepared, $0, now: now) }.filter { $0.text > 0 }
         // An exact code anywhere outranks lookalike codes: drop fuzzy code credit ("WKT" when "WWT" was said exactly).
         if all.contains(where: { $0.codeHit == .exact }) {
@@ -212,7 +230,7 @@ public struct Resolver: Sendable {
         // Report coverage and explained tokens in the caller's token space.
         return all.map { s in
             var t = s
-            t.got = Set(s.got.map { origin[$0] })
+            t.got = Set(s.got.flatMap { origin[$0] })
             t.queryCount = q.count
             t.matched = t.got.count
             return t
@@ -259,9 +277,12 @@ public struct Resolver: Sendable {
 
     /// Per-token values computed once per query instead of once per project.
     struct Prepared {
-        let tokens: [Token], keys: [String], cologne: [String], numbers: [Int?]
-        init(_ q: [Token]) {
-            tokens = q; keys = q.map(\.key); cologne = keys.map(Fuzzy.cologne); numbers = keys.map(GermanNumbers.cardinal)
+        let tokens: [Token], keys: [String], phonetic: [String], numbers: [Int?]
+        let language: AppLanguage
+        init(_ q: [Token], language: AppLanguage) {
+            tokens = q; keys = q.map(\.key); self.language = language
+            phonetic = keys.map { Fuzzy.phonetic($0, language: language) }
+            numbers = keys.map(language == .de ? GermanNumbers.cardinal : EnglishNumbers.cardinal)
         }
     }
 
@@ -284,7 +305,7 @@ public struct Resolver: Sendable {
         }
 
         if let seq = p.codeSeqs.first(where: take) { text += config.codeExact + 1.0 * Double(seq.count - 1); hit = .exact }
-        if hit == .none, p.aliasSeqs.contains(where: take) { text += config.codeAlias; hit = .alias }
+        if hit == .none, p.spokenAliasSeqs(config.language).contains(where: take) { text += config.codeAlias; hit = .alias }
         if hit == .none, let seq = p.codeSeqs.last, seq.count > 1 {
             // Multi-word code ("Hollenstein TS"): credit the words present.
             var n = 0
@@ -316,7 +337,8 @@ public struct Resolver: Sendable {
                 }
             }
             var best = 0.0, bestJ: [Int] = []
-            let kc = prepared.cologne[i]
+            let kc = prepared.phonetic[i]
+            let titlePhonetic = p.titlePhonetic(prepared.language)
             let kNumber = prepared.numbers[i]
             for j in p.titleKeys.indices where !titleUsed[j] {
                 let t = p.titleKeys[j]
@@ -324,7 +346,7 @@ public struct Resolver: Sendable {
                 if t == k || (kNumber != nil && Int(t) == kNumber) { s = config.wExact }   // "funfundvierzig" = "45"
                 else if config.synonyms[k]?.contains(t) == true { s = config.wSynonym }
                 else if k.count >= 3, t.count >= 4, t.hasPrefix(k) || (k.hasPrefix(t)) { s = config.wPrefix }
-                else if k.count >= 4, kc == p.titleCologne[j], !kc.isEmpty { s = config.wPhonetic }
+                else if k.count >= 4, kc == titlePhonetic[j], !kc.isEmpty { s = config.wPhonetic }
                 else if t.count >= 6, k.count > t.count, k.hasSuffix(t) { s = config.wPhonetic }   // compound: "ebenbetreuung"
                 else if (k.count >= 4 && Fuzzy.osa(k, t, cap: 1) <= 1) || (k.count >= 7 && Fuzzy.osa(k, t, cap: 2) <= 2) { s = config.wEdit }
                 if s > best { best = s; bestJ = [j] }

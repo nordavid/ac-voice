@@ -286,6 +286,6 @@ All under `spikes/review/`:
 ## Compliance
 - **AC API:** I made no calls. The ticket collisions come from task lists the acapi researcher had already cached.
 - **Mic, Chrome, apps:** no mic access, no Apple Events, no apps opened, no permission prompts.
-- **Repos:** ac-mcp is unchanged (`git status` there is clean). The architect's prototype was copied before I patched it.
+- **Repos:** other local repositories are unchanged. The architect's prototype was copied before I patched it.
 - **Timeouts:** every run used `alarm`, and none timed out.
 - **Stray file:** one probe copy landed in the system temp directory by mistake. I deleted it.

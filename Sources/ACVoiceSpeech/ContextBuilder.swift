@@ -7,19 +7,27 @@ import Foundation
 public enum ContextBuilder {
     /// Default size. `Config.contextualStringLimit` overrides it in the app.
     public static let defaultLimit = 35
+    /// German command phrases (`commandPhrases(_:)`).
     public static let commandPhrases = ["Ticket", "Meine Aufgaben", "Projekt"]
 
+    /// The words every command context starts with, in the language of the voice commands.
+    public static func commandPhrases(_ language: AppLanguage) -> [String] {
+        language == .de ? commandPhrases : ["Ticket", "My tasks", "Project"]
+    }
+
     /// Command phase, in this order until `limit` is reached:
-    /// 1. "Ticket", "Meine Aufgaben", "Projekt"
-    /// 2. codes of projects with personal signals (tier > 0, highest first) as written, "S+K" also as "S und K";
-    ///    "<CODE>-Projekt" for the two strongest; then their aliases
+    /// 1. "Ticket", "Meine Aufgaben", "Projekt" (English: "Ticket", "My tasks", "Project")
+    /// 2. codes of projects with personal signals (tier > 0, highest first) as written, "S+K" also as "S und K"
+    ///    ("S and K"); "<CODE>-Projekt" ("<CODE> project") for the two strongest; then their aliases
     /// 3. titles of those projects (short titles whole, long ones by their rarest words), then the single words of
     ///    the three strongest ("Relaunch" next to "Website Relaunch")
     /// 4. titles of their sibling projects (same code, at most `siblingsPerCode` each)
     /// 5. all other codes (by best tier, then project count, then name), then their aliases
-    public static func command(projects: [ProjectEntry], now: Date = .now, limit: Int = defaultLimit) -> [String] {
+    /// Codes, aliases and titles are AC names: only the command phrases and the spoken "+" follow `language`.
+    public static func command(projects: [ProjectEntry], now: Date = .now, limit: Int = defaultLimit,
+                               language: AppLanguage = .de) -> [String] {
         var out = Collector(limit: limit)
-        out.add(commandPhrases)
+        out.add(commandPhrases(language))
         let docFreq = documentFrequency(projects.map(\.title))
         let tiers = Dictionary(projects.map { ($0.id, $0.signals.tier(now: now)) }, uniquingKeysWith: max)
         let byRank = { (a: ProjectEntry, b: ProjectEntry) in
@@ -27,10 +35,10 @@ public enum ContextBuilder {
         }
         let personal = projects.filter { tiers[$0.id, default: 0] > 0 }.sorted(by: byRank)
 
-        for p in personal { if let c = p.code { out.add(codeVariants(c)) } }
+        for p in personal { if let c = p.code { out.add(codeVariants(c, language: language)) } }
         var seenCodes = Set<String>()
         let strongCodes = personal.compactMap(\.code).filter { $0.allSatisfy(\.isLetter) && seenCodes.insert($0).inserted }
-        for c in strongCodes.prefix(2) { out.add(["\(c)-Projekt"]) }
+        for c in strongCodes.prefix(2) { out.add([language == .de ? "\(c)-Projekt" : "\(c) project"]) }
         for p in personal { out.add(p.aliases) }
         for p in personal { out.add(titlePhrases(p.title, docFreq: docFreq)) }
         for p in personal.prefix(3) { out.add(words(p.title).filter { $0.count >= 4 }) }
@@ -58,7 +66,7 @@ public enum ContextBuilder {
             if $0.count != $1.count { return $0.count > $1.count }
             return $0.code.localizedStandardCompare($1.code) == .orderedAscending
         }
-        for g in ordered { out.add(codeVariants(g.code)) }
+        for g in ordered { out.add(codeVariants(g.code, language: language)) }
         for g in ordered { out.add(g.aliases) }
         return out.items
     }
@@ -67,17 +75,19 @@ public enum ContextBuilder {
     public static let siblingsPerCode = 3
 
     /// Answer phase for a visible list: number words for the visible rows ("zwo" too), ordinals, the distinctive
-    /// words of the shown titles, "abbrechen", "nein" and, when more rows exist, "mehr".
+    /// words of the shown titles, "abbrechen", "nein" and, when more rows exist, "mehr". English: "one", "the second",
+    /// "the last", "cancel", "no", "more".
     /// `titles` are the shown rows in order (project titles without code and type). Rows are numbered absolutely
     /// across "mehr" pages (PLAN 4.5): `firstNumber` is the number of the first shown row, 7 on the second page of 6.
     public static func answer(titles: [String], hasMore: Bool = false, firstNumber: Int = 1,
-                              limit: Int = defaultLimit) -> [String] {
+                              limit: Int = defaultLimit, language: AppLanguage = .de) -> [String] {
         let count = max(1, min(titles.count, maxNumberWords))
         let first = min(max(1, firstNumber), 99 - count + 1)
         let shown = first..<(first + count)
         var out = Collector(limit: limit)
-        out.add(shown.compactMap(GermanNumbers.spelled))
-        if shown.contains(2) { out.add(["zwo"]) }
+        let de = language == .de
+        out.add(shown.compactMap(de ? GermanNumbers.spelled : EnglishNumbers.spelled))
+        if de, shown.contains(2) { out.add(["zwo"]) }
         // Words that tell the rows apart: a word in every title does not help.
         let docFreq = documentFrequency(titles)
         for t in titles {
@@ -85,18 +95,19 @@ public enum ContextBuilder {
             if ws.count <= 3, !ws.isEmpty, ws.joined(separator: " ").count <= 30 { out.add([ws.joined(separator: " ")]) }
             out.add(ws.filter { docFreq[TextNorm.fold($0), default: 0] < titles.count && $0.count >= 3 })
         }
-        // The parser reads ordinals up to "zehnte" (`GermanNumbers.ordinal`).
-        out.add(Array(shown.filter { $0 <= ordinalStems.count }.prefix(6).map { "die " + ordinalStems[$0 - 1] + "e" }))
-        if count >= 2 { out.add(["die letzte"]) }
-        out.add(["abbrechen", "nein"])
-        if hasMore { out.add(["mehr"]) }
+        // The parser reads ordinals up to "zehnte" / "tenth" (`GermanNumbers.ordinal`, `EnglishNumbers.ordinal`).
+        let ordinals = shown.filter { $0 <= ordinalStems.count }.prefix(6)
+        out.add(de ? ordinals.map { "die " + ordinalStems[$0 - 1] + "e" } : ordinals.map { "the " + EnglishNumbers.ordinalWords[$0 - 1] })
+        if count >= 2 { out.add([de ? "die letzte" : "the last"]) }
+        out.add(de ? ["abbrechen", "nein"] : ["cancel", "no"])
+        if hasMore { out.add([de ? "mehr" : "more"]) }
         return out.items
     }
 
     /// Answer phase for project rows; `firstNumber` as in `answer(titles:)`.
     public static func answer(choices: [ProjectEntry], hasMore: Bool = false, firstNumber: Int = 1,
-                              limit: Int = defaultLimit) -> [String] {
-        answer(titles: choices.map(\.title), hasMore: hasMore, firstNumber: firstNumber, limit: limit)
+                              limit: Int = defaultLimit, language: AppLanguage = .de) -> [String] {
+        answer(titles: choices.map(\.title), hasMore: hasMore, firstNumber: firstNumber, limit: limit, language: language)
     }
 
     /// Number words per answer context at most (two pages of 6 rows).
@@ -106,14 +117,15 @@ public enum ContextBuilder {
 
     // MARK: Helpers
 
-    /// "S+K" -> ["S+K", "S und K"] (the spoken variant only up to 3 words). Codes stay whole up to 3 words and 24 characters, longer ones are cut to two
-    /// words (the documentation asks for 1-2 words per phrase).
-    static func codeVariants(_ code: String) -> [String] {
+    /// "S+K" -> ["S+K", "S und K"] (English "S and K"; the spoken variant only up to 3 words). Codes stay whole up to
+    /// 3 words and 24 characters, longer ones are cut to two words (the documentation asks for 1-2 words per phrase).
+    static func codeVariants(_ code: String, language: AppLanguage = .de) -> [String] {
         let parts = code.split(separator: " ").map(String.init)
         let short = parts.count <= 3 && code.count <= 24 ? parts.joined(separator: " ") : parts.prefix(2).joined(separator: " ")
         var out = [short]
         if short.contains("+") || short.contains("&") {
-            let spoken = short.replacingOccurrences(of: "+", with: " und ").replacingOccurrences(of: "&", with: " und ")
+            let joiner = language == .de ? " und " : " and "
+            let spoken = short.replacingOccurrences(of: "+", with: joiner).replacingOccurrences(of: "&", with: joiner)
                 .split(separator: " ")
             // "S und K" yes, "S und K Partner" no: the resolver maps "+", "&" and "und" anyway.
             if spoken.count <= 3 { out.append(spoken.joined(separator: " ")) }

@@ -7,7 +7,7 @@ import Foundation
 // It never opens the microphone. Interpretations are printed as ids only (project names are private data).
 //
 //   acvoice-transcribe <file...> [--realtime] [--answer] [--projects <tsv|json>] [--alias CODE=a|b]
-//                      [--choices <id,id,...>] [--context-limit N] [--no-context] [--no-adaptive]
+//                      [--choices <id,id,...>] [--context-limit N] [--no-context] [--no-adaptive] [--lang de|en]
 //
 // Every argument is one utterance of one session (one key press); "a.aiff+b.aiff" plays files back to back
 // with their silence trimmed and a 120 ms gap.
@@ -19,9 +19,10 @@ import Foundation
 //                aliases of a JSON list, the only aliases of a TSV list
 // --no-adaptive  keep the default hangover instead of playing the app's flow on every live partial
 //                (Core `HangoverPolicy.standard`: fast for a resolved preview, long for a dangling word or number)
+// --lang         language of the speech model, the contexts and the commands (default de, as the app on a German Mac)
 
 func usage() -> Never {
-    print("usage: acvoice-transcribe <file[+file]...> [--realtime] [--answer] [--projects <tsv|json>] [--alias CODE=a|b] [--choices <id,...>] [--context-limit N] [--no-context] [--no-adaptive]")
+    print("usage: acvoice-transcribe <file[+file]...> [--realtime] [--answer] [--projects <tsv|json>] [--alias CODE=a|b] [--choices <id,...>] [--context-limit N] [--no-context] [--no-adaptive] [--lang de|en]")
     exit(2)
 }
 
@@ -32,6 +33,7 @@ var projectsPath: String?
 var fixedChoices: [Int]?
 var aliases: [String: [String]] = [:]
 var contextLimit = ContextBuilder.defaultLimit
+var language = AppLanguage.de
 while !args.isEmpty {
     let a = args.removeFirst()
     switch a {
@@ -53,6 +55,9 @@ while !args.isEmpty {
     case "--context-limit":
         guard let n = args.first.flatMap({ Int($0) }) else { usage() }
         args.removeFirst(); contextLimit = n
+    case "--lang":
+        guard let l = args.first.flatMap(AppLanguage.init(rawValue:)) else { usage() }
+        args.removeFirst(); language = l
     case "-h", "--help": usage()
     default:
         if a.hasPrefix("--") { usage() }
@@ -75,9 +80,9 @@ if let path = projectsPath ?? (FileManager.default.fileExists(atPath: defaultFix
         projects = ProjectCatalog.entries(tsv: tsv).map { $0.addingAliases(byCode: aliases) }
     }
 }
-let interpreter: Interpreter? = projects.isEmpty ? nil : Interpreter(resolver: Resolver(projects: projects))
-let commandContext = useContext ? ContextBuilder.command(projects: projects, now: now, limit: contextLimit) : []
-print("projects: \(projects.count), command context: \(commandContext.count) strings, pacing: \(realtime ? "real time" : "fast")")
+let interpreter: Interpreter? = projects.isEmpty ? nil : Interpreter(resolver: Resolver(projects: projects), language: language)
+let commandContext = useContext ? ContextBuilder.command(projects: projects, now: now, limit: contextLimit, language: language) : []
+print("projects: \(projects.count), command context: \(commandContext.count) strings, pacing: \(realtime ? "real time" : "fast"), language: \(language.rawValue)")
 
 /// Utterances and other session events, handed from the event task to the main flow.
 final class Inbox: @unchecked Sendable {
@@ -117,7 +122,7 @@ func quoted(_ t: TranscriberText) -> String {
     return s
 }
 
-let session = VoiceSession()
+let session = VoiceSession(locale: language.speechLocale)
 do {
     try await session.warmUp(context: commandContext)
 } catch {
@@ -144,15 +149,17 @@ let consumer = Task {
                 guard !hyps.isEmpty else { break }
                 let policy = HangoverPolicy.standard
                 if inbox.mode == .command {
-                    session.setHangover(policy.command(text: text, interpretation: interpreter.command(hyps, now: now)))
+                    session.setHangover(policy.command(text: text, interpretation: interpreter.command(hyps, now: now),
+                                                       language: language))
                 } else {
                     let outcome = interpreter.selection(hyps, candidates: inbox.candidates, now: now)
-                    session.setHangover(policy.answer(text: text, outcome: outcome, command: { interpreter.command(hyps, now: now) }))
+                    session.setHangover(policy.answer(text: text, outcome: outcome, language: language,
+                                                      command: { interpreter.command(hyps, now: now) }))
                 }
             }
         case .utterance(let u): inbox.push(.utterance(u))
         case .noSpeech: inbox.push(.noSpeech)
-        case .failed(let err): inbox.push(.failed(err.message))
+        case .failed(let err): inbox.push(.failed(err.message(language)))
         default: break
         }
     }
@@ -166,7 +173,8 @@ for (i, arg) in files.enumerated() {
             let titles = candidates.map { id in projects.first { $0.id == id }?.title ?? "" }
             inbox.mode = .answer
             inbox.candidates = candidates
-            await session.expectAnswer(context: useContext ? ContextBuilder.answer(titles: titles, limit: contextLimit) : [])
+            await session.expectAnswer(context: useContext
+                ? ContextBuilder.answer(titles: titles, limit: contextLimit, language: language) : [])
         } else if i > 0 {
             inbox.mode = .command
             await session.expectCommand(context: commandContext)

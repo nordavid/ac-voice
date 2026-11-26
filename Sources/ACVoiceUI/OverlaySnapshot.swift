@@ -96,17 +96,25 @@ public enum OverlayGallery {
     /// Fixed render time, so snapshots are reproducible.
     public static let reference = Date(timeIntervalSinceReferenceDate: 812_000_000)
 
-    public static func scenarios(reference t0: Date = reference) -> [OverlayScenario] {
+    /// The gallery in `language`: the flow's and the overlay's texts and the spoken commands in that language. Project
+    /// names stay as they are (they come from AC).
+    public static func scenarios(reference t0: Date = reference, language: AppLanguage = .de) -> [OverlayScenario] {
+        let f = FlowText(language)
+        // What the user said, per language.
+        func said(_ de: String, _ en: String) -> String { language == .de ? de : en }
         func model(_ phase: FlowPhase, seq: Int, _ edit: (inout OverlayModel) -> Void) -> OverlayModel {
             var m = OverlayModel()
             m.seq = seq
             m.phase = phase
             m.visible = true
             m.since = t0
+            m.language = language
             m.micReady = phase == .listening || phase == .retry || phase == .choices
             edit(&m)
             return m
         }
+        let openWWT = said("Öffne das WWT-Projekt", "Open WWT")
+        let ticket412 = said("Öffne WWT Ticket 412", "Open WWT ticket 412")
         let wwt = [
             item(1, 628, "WWT: Website Relaunch [AGIL]", badges: [.favorite, .recent]),
             item(2, 315, "WWT: TYPO3 Website maintenance [AGIL]", badges: [.recent]),
@@ -141,81 +149,82 @@ public enum OverlayGallery {
             OverlayScenario(name: "listening-cold", model: model(.listening, seq: 1) {
                 $0.micReady = false
                 $0.warming = true
-                $0.message = FlowText.loadingModel
+                $0.message = f.loadingModel
             }, now: t0.addingTimeInterval(0.6), level: 0),
             OverlayScenario(name: "listening-partial", model: model(.listening, seq: 4) {
-                $0.transcript = Transcript(stable: "Öffne WWT", volatile: "Relaunch")
+                $0.transcript = Transcript(stable: said("Öffne WWT", "Open WWT"), volatile: "Relaunch")
                 $0.preview = "WWT: Website Relaunch"
             }, now: t0.addingTimeInterval(1.35), level: 0.62),
             OverlayScenario(name: "listening-long", model: model(.listening, seq: 5) {
                 $0.transcript = Transcript(
-                    stable: "Öffne bitte das Projekt Hollenstein Optical mit der Hotline und danach noch das Ticket",
-                    volatile: "siebenundvierzigtausend")
-                $0.preview = FlowText.projectCount(5, code: nil)
+                    stable: said("Öffne bitte das Projekt Hollenstein Optical mit der Hotline und danach noch das Ticket",
+                                 "Please open the Hollenstein Optical project with the hotline and after that the ticket"),
+                    volatile: said("siebenundvierzigtausend", "forty-seven thousand"))
+                $0.preview = f.projectCount(5, code: nil)
             }, now: t0.addingTimeInterval(2.2), level: 0.35),
             OverlayScenario(name: "processing", model: model(.processing, seq: 6) { _ in },
                             now: t0.addingTimeInterval(0.2), level: 0),
             OverlayScenario(name: "processing-search", model: model(.processing, seq: 7) {
-                $0.transcript = Transcript(stable: "Öffne WWT Ticket 412")
-                $0.message = FlowText.searchingTicket(412)
+                $0.transcript = Transcript(stable: ticket412)
+                $0.message = f.searchingTicket(412)
             }, now: t0.addingTimeInterval(0.42), level: 0),
             OverlayScenario(name: "choices", model: model(.choices, seq: 9) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
-                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                $0.transcript = Transcript(stable: openWWT)
+                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(1.8), level: 0.15),
             OverlayScenario(name: "choices-answer", model: model(.choices, seq: 10) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
-                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6.4))
-                $0.answer = Transcript(stable: "Die", volatile: "zweite")
+                $0.transcript = Transcript(stable: openWWT)
+                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6.4), f)
+                $0.answer = Transcript(stable: said("Die", "Number"), volatile: said("zweite", "two"))
             }, now: t0.addingTimeInterval(2.4), level: 0.55),
             OverlayScenario(name: "choices-held", model: model(.choices, seq: 11) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
-                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(30))
+                $0.transcript = Transcript(stable: openWWT)
+                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(30), f)
                 $0.countdownFrozen = 3.4
             }, now: t0.addingTimeInterval(4.0), level: 0.05),
             OverlayScenario(name: "choices-more", model: model(.choices, seq: 12) {
-                $0.transcript = Transcript(stable: "Öffne QZ")
-                list(&$0, qz, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                $0.transcript = Transcript(stable: said("Öffne QZ", "Open QZ"))
+                list(&$0, qz, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(1.4), level: 0.1),
             OverlayScenario(name: "choices-page2", model: model(.choices, seq: 14) {
-                $0.transcript = Transcript(stable: "Öffne QZ")
-                list(&$0, qz, page: 1, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                $0.transcript = Transcript(stable: said("Öffne QZ", "Open QZ"))
+                list(&$0, qz, page: 1, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(0.9), level: 0.1),
             OverlayScenario(name: "choices-narrowed", model: model(.choices, seq: 12) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
+                $0.transcript = Transcript(stable: openWWT)
                 list(&$0, [item(1, 628, "WWT: Website Relaunch [AGIL]", badges: [.favorite, .recent]),
                            item(2, 315, "WWT: TYPO3 Website maintenance [AGIL]", badges: [.recent])],
-                     page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
-                $0.hint = FlowText.narrowed("Website", count: 2)
+                     page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
+                $0.hint = f.narrowed("Website", count: 2)
             }, now: t0.addingTimeInterval(1.1), level: 0.2),
             OverlayScenario(name: "choices-unclear", model: model(.choices, seq: 11) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
-                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(7.5))
-                $0.hint = FlowText.unclearAnswer("Hi.")
+                $0.transcript = Transcript(stable: openWWT)
+                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(7.5), f)
+                $0.hint = f.unclearAnswer("Hi.")
                 $0.hintIsAlert = true
             }, now: t0.addingTimeInterval(4.1), level: 0.05),
             OverlayScenario(name: "choices-nomore", model: model(.choices, seq: 13) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
-                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
-                $0.hint = FlowText.noMoreChoices
+                $0.transcript = Transcript(stable: openWWT)
+                list(&$0, wwt, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
+                $0.hint = f.noMoreChoices
             }, now: t0.addingTimeInterval(1.6), level: 0.05),
             OverlayScenario(name: "choices-long-titles", model: model(.choices, seq: 15) {
-                $0.transcript = Transcript(stable: "Öffne Plattform")
-                list(&$0, long, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                $0.transcript = Transcript(stable: said("Öffne Plattform", "Open Plattform"))
+                list(&$0, long, page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(1.0), level: 0.1),
             OverlayScenario(name: "choices-confirm", model: model(.choices, seq: 10) {
-                $0.transcript = Transcript(stable: "Öffne Ebenbetreuung")
+                $0.transcript = Transcript(stable: said("Öffne Ebenbetreuung", "Open IBN Betreuung"))
                 list(&$0, [item(1, 2041, "IBN: Betreuung Plattform [SLA]", badges: [.recent])],
-                     page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                     page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(2.6), level: 0.1),
             OverlayScenario(name: "choices-tickets", model: model(.choices, seq: 9) {
-                $0.transcript = Transcript(stable: "Öffne WWT Ticket 112")
+                $0.transcript = Transcript(stable: said("Öffne WWT Ticket 112", "Open WWT ticket 112"))
                 list(&$0, [
                     item(1, 628, "WWT: Website Relaunch [AGIL]", badges: [.favorite, .recent, .mine], ticket: (40112, 112)),
                     item(2, 315, "WWT: TYPO3 Website maintenance [AGIL]", badges: [.recent], ticket: (31877, 112)),
                     item(3, 314, "WWT: Maintenance [SLA]", ticket: (24410, 112)),
                     item(4, 693, "WWT: Grand Navigation [AGIL]", badges: [.completed], ticket: (18233, 112)),
-                ], page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                ], page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(1.2), level: 0.1),
             OverlayScenario(name: "choices-ticket-chips", model: model(.choices, seq: 9) {
                 $0.transcript = Transcript(stable: "Ticket 412")
@@ -223,46 +232,46 @@ public enum OverlayGallery {
                     item(1, 628, "WWT: Website Relaunch [AGIL]", badges: [.mine], ticket: (40112, 412)),
                     item(2, 2071, "QZ: CRM [INT]", ticket: (31877, 41)),
                     item(3, 2041, "IBN: Betreuung Plattform [SLA]", badges: [.completed], ticket: (24410, 4120)),
-                ], page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6))
+                ], page: 0, pageSize: 6, deadline: t0.addingTimeInterval(6), f)
             }, now: t0.addingTimeInterval(1.2), level: 0.1),
             OverlayScenario(name: "retry", model: model(.retry, seq: 6) {
-                $0.transcript = Transcript(stable: "Hallo Welt")
-                $0.message = FlowText.notUnderstoodRetry
+                $0.transcript = Transcript(stable: said("Hallo Welt", "Hello world"))
+                $0.message = f.notUnderstoodRetry
             }, now: t0.addingTimeInterval(0.8), level: 0.12),
             OverlayScenario(name: "retry-nothing", model: model(.retry, seq: 6) {
-                $0.message = FlowText.nothingHeardRetry
+                $0.message = f.nothingHeardRetry
             }, now: t0.addingTimeInterval(0.8), level: 0.05),
             OverlayScenario(name: "opening", model: model(.opening, seq: 15) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
+                $0.transcript = Transcript(stable: openWWT)
                 $0.preview = "WWT: TYPO3 Website maintenance"
             }, now: t0.addingTimeInterval(0.15), level: 0),
             OverlayScenario(name: "success", model: model(.success, seq: 16) {
-                $0.transcript = Transcript(stable: "Öffne das WWT-Projekt")
+                $0.transcript = Transcript(stable: openWWT)
                 $0.message = "WWT: TYPO3 Website maintenance"
             }, now: t0.addingTimeInterval(0.55), level: 0),
             OverlayScenario(name: "success-long", model: model(.success, seq: 16) {
-                $0.message = FlowText.ticketTitle(1234, project: "RBZ: Kassensystem Umzug von Stand 2024.3 auf Stand 2025.1")
+                $0.message = f.ticketTitle(1234, project: "RBZ: Kassensystem Umzug von Stand 2024.3 auf Stand 2025.1")
             }, now: t0.addingTimeInterval(0.55), level: 0),
             OverlayScenario(name: "success-hint", model: model(.success, seq: 16) {
-                $0.message = FlowText.ticketTitle(47285, project: "QZ: CRM")
-                $0.hint = FlowText.automationSetupHint
+                $0.message = f.ticketTitle(47285, project: "QZ: CRM")
+                $0.hint = f.automationSetupHint
             }, now: t0.addingTimeInterval(1.0), level: 0),
             OverlayScenario(name: "error", model: model(.error, seq: 8) {
-                $0.transcript = Transcript(stable: "Öffne WWT Ticket 412")
-                $0.message = FlowText.ticketNotFound(412, code: "WWT")
+                $0.transcript = Transcript(stable: ticket412)
+                $0.message = f.ticketNotFound(412, code: "WWT")
             }, now: t0.addingTimeInterval(0.5), level: 0),
             OverlayScenario(name: "error-offline", model: model(.error, seq: 8) {
-                $0.transcript = Transcript(stable: "Öffne WWT Ticket 412")
-                $0.message = FlowText.acUnreachable
-                $0.hint = FlowText.hint(forError: FlowText.acUnreachable)
+                $0.transcript = Transcript(stable: ticket412)
+                $0.message = f.acUnreachable
+                $0.hint = f.hint(forError: f.acUnreachable)
             }, now: t0.addingTimeInterval(0.5), level: 0),
             OverlayScenario(name: "error-mic", model: model(.error, seq: 3) {
-                $0.message = FlowText.micDenied
-                $0.hint = FlowText.hint(forError: FlowText.micDenied)
+                $0.message = f.micDenied
+                $0.hint = f.hint(forError: f.micDenied)
             }, now: t0.addingTimeInterval(0.5), level: 0),
             OverlayScenario(name: "error-nothing", model: model(.error, seq: 3) {
-                $0.message = FlowText.nothingHeard
-                $0.hint = FlowText.hint(forError: FlowText.nothingHeard)
+                $0.message = f.nothingHeard
+                $0.hint = f.hint(forError: f.nothingHeard)
             }, now: t0.addingTimeInterval(0.5), level: 0),
         ]
     }
@@ -274,7 +283,8 @@ public enum OverlayGallery {
         let display = p.code.map { p.title.isEmpty ? $0 : "\($0): \(p.title)" } ?? p.title
         let target: ChoiceTarget = ticket.map { .task(projectId: projectId, taskId: $0.taskId, number: $0.number) }
             ?? .project(id: projectId)
-        let detail = ticket.map { FlowText.ticketTitle($0.number, project: name.trimmingCharacters(in: .whitespaces)) }
+        // "Ticket 412 · WWT: …" reads the same in both languages.
+        let detail = ticket.map { FlowText.de.ticketTitle($0.number, project: name.trimmingCharacters(in: .whitespaces)) }
             ?? name.trimmingCharacters(in: .whitespaces)
         let label = p.title.count <= 12 ? p.title : String(p.title.prefix(11)) + "…"
         return ChoiceItem(n: n, label: label, title: p.title, code: p.code, type: p.type, displayName: display,
@@ -282,7 +292,8 @@ public enum OverlayGallery {
     }
 
     /// Fills the list fields the way `VoiceFlow.renderList` does.
-    static func list(_ m: inout OverlayModel, _ items: [ChoiceItem], page: Int, pageSize: Int, deadline: Date) {
+    static func list(_ m: inout OverlayModel, _ items: [ChoiceItem], page: Int, pageSize: Int, deadline: Date,
+                     _ f: FlowText = .de) {
         let pageCount = max(1, (items.count + pageSize - 1) / pageSize)
         let lo = min(page * pageSize, items.count)
         m.choices = Array(items[lo..<min(lo + pageSize, items.count)])
@@ -291,6 +302,6 @@ public enum OverlayGallery {
         m.pageCount = pageCount
         m.pageSize = pageSize
         m.deadline = deadline
-        m.hint = items.count == 1 ? FlowText.sayYesOrOne : nil
+        m.hint = items.count == 1 ? f.sayYesOrOne : nil
     }
 }

@@ -13,6 +13,8 @@ public final class AppCoordinator {
 
     public let controller: Controller?
     private let demoOverlay: (any OverlayPresenting)?
+    /// Language of the demo mode's menu and overlay (the controller has its own).
+    private let demoLanguage: AppLanguage
     private let clock: any RuntimeClock
     private var statusMenu: StatusMenuController?
     private var onboarding: OnboardingWindowController?
@@ -29,7 +31,7 @@ public final class AppCoordinator {
         if arguments.contains(demoArgument) {
             let overlay = OverlayController()
             overlay.backdrop = OverlayBackdrop(rawValue: config.overlayBackdrop) ?? .liquidGlass
-            return AppCoordinator(demoOverlay: overlay, clock: SystemClock())
+            return AppCoordinator(demoOverlay: overlay, clock: SystemClock(), language: config.appLanguage())
         }
         let timings = FlowTimings()
         let controller = Controller(services: .live(config: config, timings: timings, store: store), timings: timings,
@@ -41,12 +43,14 @@ public final class AppCoordinator {
         self.controller = controller
         demoOverlay = nil
         clock = controller.services.clock
+        demoLanguage = controller.language
     }
 
-    init(demoOverlay: any OverlayPresenting, clock: any RuntimeClock) {
+    init(demoOverlay: any OverlayPresenting, clock: any RuntimeClock, language: AppLanguage = .de) {
         controller = nil
         self.demoOverlay = demoOverlay
         self.clock = clock
+        demoLanguage = language
     }
 
     public var isDemoMode: Bool { controller == nil }
@@ -191,16 +195,18 @@ public final class AppCoordinator {
 
     private func startDemoMode() {
         guard let overlay = demoOverlay else { return }
+        let language = demoLanguage
+        let text = AppText(language)
         statusMenu = StatusMenuController(
-            state: { MenuState(statusLines: [AppText.demoRunning]) },
-            icon: { MenuIcon() },
+            state: { MenuState(statusLines: [text.demoRunning], language: language) },
+            icon: { MenuIcon(language: language) },
             items: { s in
                 s.statusLines.map { MenuItemSpec(kind: .status, title: $0, enabled: false) }
-                    + [.separator, MenuItemSpec(kind: .command(.quit), title: AppText.quit, key: "q",
+                    + [.separator, MenuItemSpec(kind: .command(.quit), title: text.quit, key: "q",
                                                 modifiers: NSEvent.ModifierFlags.command.rawValue)]
             },
             perform: { [weak self] in self?.perform($0) })
-        let d = OverlayDemo(overlay: overlay, clock: clock)
+        let d = OverlayDemo(overlay: overlay, clock: clock, language: language)
         demo = d
         d.start(loop: true)
     }

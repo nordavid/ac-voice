@@ -16,6 +16,7 @@ import streamDeck, {
 import type { JsonObject, JsonValue } from "@elgato/utils";
 import { AppLink } from "./app-link.js";
 import { APP_BUNDLE_ID, PLUGIN_VERSION, socketPath, VOICE_ACTION_UUID } from "./config.js";
+import { fromStreamDeck } from "./i18n.js";
 import { KeyEdges } from "./keys.js";
 import { createLauncher } from "./launcher.js";
 import { Painter } from "./painter.js";
@@ -25,12 +26,21 @@ streamDeck.logger.setLevel("info");
 const log = streamDeck.logger.createScope("ACVoice");
 const logInfo = (m: string) => log.info(m);
 
-const model = new ViewModel();
+/** The Stream Deck language: the key's language until the app names its own (`state.lang`). */
+function streamDeckLanguage(): unknown {
+	try {
+		return streamDeck.info.application.language;
+	} catch {
+		return undefined;
+	}
+}
+
+const model = new ViewModel(Date.now, fromStreamDeck(streamDeckLanguage()));
 const painter = new Painter(() => model.view);
 
-/** Status for the property inspector (ui/voice.html). Only sent while it is visible. */
+/** Status for the property inspector (ui/voice.html). Only sent while it is visible. `lang`: the key's language. */
 function inspectorStatus(): JsonObject {
-	return { type: "status", link: link.status, error: link.error ?? null, busy: link.busy, version: PLUGIN_VERSION };
+	return { type: "status", link: link.status, error: link.error ?? null, busy: link.busy, version: PLUGIN_VERSION, lang: model.view.lang };
 }
 
 function publishInspectorStatus(): void {
@@ -45,8 +55,11 @@ const link = new AppLink(
 			publishInspectorStatus();
 		},
 		state: (state) => {
+			const lang = model.view.lang;
 			model.state(state);
 			painter.update();
+			// The app named another language than the inspector shows: it switches.
+			if (model.view.lang !== lang) publishInspectorStatus();
 		},
 		// No paint here: the 100 ms tick picks the level up (caps setImage at 10 fps).
 		level: (rms) => model.level(rms),

@@ -22,7 +22,7 @@ public final class LiveSpeech: SpeechServing {
     private var pumps: [Int: Task<Void, Never>] = [:]
 
     public init(config: Config, timings: FlowTimings) {
-        session = VoiceSession(tuning: Self.tuning(timings))
+        session = VoiceSession(tuning: Self.tuning(timings), locale: config.appLanguage().speechLocale)
         source = MicSource(options: .init(deviceUID: config.inputDeviceUID, avoidBluetooth: config.avoidBluetoothInput))
     }
 
@@ -66,8 +66,8 @@ public final class LiveSpeech: SpeechServing {
     public func endUtteranceNow() -> Bool { session.endUtteranceNow() }
     public func stop() async { await session.stop() }
 
-    public func selfCheck() async -> SelfCheckResult {
-        let r = await SpeechSelfCheck.run()
+    public func selfCheck(language: AppLanguage) async -> SelfCheckResult {
+        let r = await SpeechSelfCheck.run(language: language)
         return SelfCheckResult(passed: r.passed, elapsedMs: r.elapsedMs, message: r.message)
     }
 
@@ -92,7 +92,7 @@ public final class LiveSpeech: SpeechServing {
 
 // MARK: - AC
 
-/// `IndexStore` + `ACClient` with the Keychain token (re-import from ac-mcp after a rejection).
+/// `IndexStore` + `ACClient` with the Keychain token of the configured AC host.
 @MainActor
 public final class LiveIndex: IndexServing {
     public let userId: Int
@@ -101,8 +101,7 @@ public final class LiveIndex: IndexServing {
 
     public init(config: Config, userId: Int, cacheURL: URL = AppPaths.indexCache) {
         self.userId = userId
-        let tokens = KeychainTokenStore(account: LiveTokens.account(config),
-                                        reimport: ACMCPTokenImporter(directory: ACMCPTokenImporter.directory(for: config)))
+        let tokens = KeychainTokenStore(base: config.acBaseURL)
         client = ACClient(base: config.acBaseURL, userId: userId, tokens: tokens)
         store = IndexStore(client: client, cacheURL: cacheURL)
     }
@@ -120,48 +119,38 @@ public final class LiveIndex: IndexServing {
     public func resetToken() async { await client.resetToken() }
 }
 
-/// The login Keychain (service "io.github.nordavid.acvoice", account = AC host) and the read-only ac-mcp import. Keychain
-/// calls run on a private serial queue, never on the main thread.
+/// The login Keychain (service "io.github.nordavid.acvoice", account = AC host and a non-default port,
+/// `KeychainTokenStore.account(for:)`) and the sign-in with e-mail and password (`ACTokenIssuer`). Keychain calls run on a private serial queue, never on the main thread.
 @MainActor
 public final class LiveTokens: TokenServing {
-    private let keychain: KeychainTokenStore
-    private let importer: ACMCPTokenImporter
     private nonisolated static let queue = DispatchQueue(label: "io.github.nordavid.acvoice.tokens", qos: .userInitiated)
 
-    public init(config: Config) {
-        keychain = KeychainTokenStore(account: Self.account(config))
-        importer = ACMCPTokenImporter(directory: ACMCPTokenImporter.directory(for: config))
-    }
+    public init() {}
 
-    nonisolated static func account(_ config: Config) -> String { config.acBaseURL.host ?? "ac.example.com" }
-
-    public func stored() async -> StoredToken {
-        let keychain = keychain
+    public func stored(for base: URL) async -> StoredToken {
+        let keychain = KeychainTokenStore(base: base)
         return await Self.offMain {
             do {
                 guard let t = try keychain.load() else { return .missing }
-                return .present(userId: ACMCPTokenImporter.userId(fromToken: t))
+                return .present(userId: ACToken.userId(from: t))
             } catch {
                 return .unreadable((error as? ACError)?.userMessage ?? ACError.keychain(status: 0).userMessage)
             }
         }
     }
 
-    public func importFromACMCP() async throws -> Int? {
-        let keychain = keychain, importer = importer
-        return try await Self.offMainThrowing {
-            let imported = try importer.load()
-            try keychain.save(imported.token)
-            return imported.userId
-        }
+    public func login(base: URL, username: String, password: String) async throws -> Int? {
+        // The issuer lives for this call only; the password goes into its request body and nowhere else.
+        let token = try await ACTokenIssuer(base: base).issueToken(username: username, password: password)
+        return try await save(token, for: base)
     }
 
-    public func save(_ token: String) async throws -> Int? {
-        let keychain = keychain
+    public func save(_ token: String, for base: URL) async throws -> Int? {
+        let keychain = KeychainTokenStore(base: base)
         let clean = token.trimmingCharacters(in: .whitespacesAndNewlines)
         return try await Self.offMainThrowing {
             try keychain.save(clean)
-            return ACMCPTokenImporter.userId(fromToken: clean)
+            return ACToken.userId(from: clean)
         }
     }
 
@@ -312,11 +301,18 @@ public final class FileStore: Persisting {
         }
     }
 
+    public func saveACBaseURL(_ base: URL) {
+        let url = configURL, value = base.absoluteString
+        queue.async {
+            do { try Self.update(url, key: "acBaseURL", value: value) } catch { Log.error(.app, "config.save.failed", error) }
+        }
+    }
+
     public func flush() { queue.sync {} }
 
     /// Sets one key in a JSON object file and keeps every other key (unknown ones too). A missing or broken file
     /// becomes a new object.
-    nonisolated static func update(_ url: URL, key: String, value: Bool) throws {
+    nonisolated static func update(_ url: URL, key: String, value: any Sendable) throws {
         var object: [String: Any] = [:]
         if let data = try? Data(contentsOf: url),
            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -344,7 +340,7 @@ extension Services {
         overlay.backdrop = OverlayBackdrop(rawValue: config.overlayBackdrop) ?? .liquidGlass
         return Services(
             speech: LiveSpeech(config: config, timings: timings),
-            tokens: LiveTokens(config: config),
+            tokens: LiveTokens(),
             makeIndex: { userId, config in LiveIndex(config: config, userId: userId) },
             permissions: LivePermissions(),
             overlay: EscapeClosesOverlay(overlay, escape: EscapeKey(holdModifiers: config.hotkey.enabled ? config.hotkey.modifiers : 0)),

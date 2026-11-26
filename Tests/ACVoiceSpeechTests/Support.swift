@@ -68,21 +68,22 @@ extension EndpointGate.Output {
 func near(_ a: Double, _ b: Double, _ tol: Double = 0.011) -> Bool { abs(a - b) <= tol }
 
 /// Plays the app's flow for the speech layer alone: the hangover VoiceFlow sends for a live partial (Core
-/// `HangoverPolicy.standard`, the leading of DT and ST as in the flow).
+/// `HangoverPolicy.standard`, the leading of DT and ST as in the flow), in the interpreter's language.
 enum Controller {
     static let policy = HangoverPolicy.standard
 
     static func commandHangover(_ dt: String, _ st: String = "", using interpreter: Interpreter = Fixture.interpreter,
                                 now: Date = Fixture.now) -> Double {
         let hyps = [Hypothesis(dt), Hypothesis(st)].filter { !$0.text.isEmpty }
-        return policy.command(text: EndpointGate.leading(dt, st), interpretation: interpreter.command(hyps, now: now))
+        return policy.command(text: EndpointGate.leading(dt, st), interpretation: interpreter.command(hyps, now: now),
+                              language: interpreter.language)
     }
 
     static func answerHangover(_ dt: String, _ st: String = "", candidates: [Int], using interpreter: Interpreter = Fixture.interpreter,
                                now: Date = Fixture.now) -> Double {
         let hyps = [Hypothesis(dt), Hypothesis(st)].filter { !$0.text.isEmpty }
         let outcome = interpreter.selection(hyps, candidates: candidates, now: now)
-        return policy.answer(text: EndpointGate.leading(dt, st), outcome: outcome,
+        return policy.answer(text: EndpointGate.leading(dt, st), outcome: outcome, language: interpreter.language,
                              command: { interpreter.command(hyps, now: now) })
     }
 }

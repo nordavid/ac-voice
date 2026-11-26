@@ -41,6 +41,7 @@ func stateDict(_ s: IPC.State) -> [String: Any] {
     if let x = s.deadline { o["deadline"] = x }
     if let x = s.message { o["message"] = x }
     if let x = s.micReady { o["micReady"] = x }
+    if let x = s.lang { o["lang"] = x }
     return o
 }
 
@@ -103,8 +104,11 @@ let states: [IPC.State] = [
                         .init(n: 6, label: "S+K Partner", detail: "S+K: Partner [INT]")],
               total: 9, deadline: 1_732_440_007_000, message: "Sag eine Zahl"),
     IPC.State(seq: 7, phase: .success, since: 1_732_440_002_000, transcript: "WWT Relaunch",
-              preview: "WWT: Website Relaunch", message: "WWT: Website Relaunch"),
+              preview: "WWT: Website Relaunch", message: "WWT: Website Relaunch", lang: "de"),
     IPC.State(seq: 8, phase: .error, since: 1_732_440_003_000, message: "Nichts gehört"),
+    IPC.State(seq: 10, phase: .error, since: 1_732_440_004_000, transcript: "my tasks", message: "I can’t hear anything",
+              lang: "en"),
+    IPC.State(seq: 11, phase: .idle, since: 1_732_440_005_000, lang: "en"),
     IPC.State(seq: 9, phase: .listening, since: 1, transcript: "Quote \" back\\slash / tab\tnew\nline <b>&amp; 🎙 é",
               micReady: true),
 ]
@@ -115,6 +119,9 @@ let stateInputs: [String] = [
     // Research example (no preview/total).
     #"{"v":1,"t":"state","seq":6,"phase":"choices","since":1732440001234,"transcript":"Öffne das WWT-Projekt","deadline":1732440006234,"choices":[{"n":1,"label":"Relaunch","detail":"WWT: Website Relaunch [AGIL]"}]}"#,
     #"{"v":1,"t":"state","seq":2,"phase":"listening","since":5,"micReady":true,"future":{"x":[1,2]}}"#,
+    // The app language (optional; older apps omit it).
+    #"{"v":1,"t":"state","seq":3,"phase":"idle","since":5,"lang":"en"}"#,
+    #"{"v":1,"t":"state","seq":3,"phase":"idle","since":5,"lang":null}"#,
     #"{"v":1,"t":"state","seq":2,"phase":"thinking","since":5}"#,
     #"{"v":1,"t":"state","seq":2,"phase":"idle"}"#,
     #"{"v":1,"t":"state","phase":"idle","since":5}"#,

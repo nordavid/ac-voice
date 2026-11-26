@@ -198,7 +198,7 @@ final class FakeSurface: OverlaySurface {
 
     @Test func showDuringAFadeCancelsTheOrderOut() {
         let (c, surface) = Self.make()
-        c.render(ViewStateTests.model(.error) { $0.message = FlowText.nothingHeard })
+        c.render(ViewStateTests.model(.error) { $0.message = FlowText.de.nothingHeard })
         c.show()
         c.hide(fade: 0.2)
         c.render(ViewStateTests.model(.listening, seq: 9) { $0.micReady = true })
@@ -293,7 +293,7 @@ final class FakeSurface: OverlaySurface {
         #expect(reports == [true, false, true, false])
         root.actions.pointer(true)
         #expect(reports.count == 4)
-        c.render(ViewStateTests.model(.error, seq: 8) { $0.message = FlowText.nothingHeard })
+        c.render(ViewStateTests.model(.error, seq: 8) { $0.message = FlowText.de.nothingHeard })
         root.actions.pointer(true)
         #expect(reports.last == true)
         c.hide(fade: 0.2)
@@ -315,10 +315,10 @@ final class FakeSurface: OverlaySurface {
         c.show()
         #expect(surface.announcements.isEmpty)   // listening speaks for itself (earcon)
         c.render(ControllerTests.list(seq: 5, ViewStateTests.wwt))
-        #expect(surface.announcements.count == 1 && surface.announcements[0].hasPrefix(OverlayText.a11yChoices))
+        #expect(surface.announcements.count == 1 && surface.announcements[0].hasPrefix(OverlayText.de.a11yChoices))
         c.render(ControllerTests.list(seq: 6, ViewStateTests.wwt))   // same phase: no repeat
         #expect(surface.announcements.count == 1)
-        c.render(ViewStateTests.model(.error, seq: 7) { $0.message = FlowText.nothingHeard; $0.hint = FlowText.tryMyTasks })
+        c.render(ViewStateTests.model(.error, seq: 7) { $0.message = FlowText.de.nothingHeard; $0.hint = FlowText.de.tryMyTasks })
         #expect(surface.announcements.last == "Fehler. Ich höre nichts. Sag zum Beispiel „Meine Aufgaben“")
     }
 }

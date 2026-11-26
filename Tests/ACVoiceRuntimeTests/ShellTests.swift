@@ -14,7 +14,7 @@ import Testing
 @MainActor
 @Suite struct MenuTests {
     static func diagnose(_ items: [MenuItemSpec]) -> [MenuItemSpec] {
-        for i in items { if case .submenu(let sub) = i.kind, i.title == AppText.diagnostics { return sub } }
+        for i in items { if case .submenu(let sub) = i.kind, i.title == AppText.de.diagnostics { return sub } }
         return []
     }
 
@@ -53,14 +53,14 @@ import Testing
         #expect(!StatusMenuModel.items(MenuState(loginItem: .enabled)).contains { $0.kind == .command(.openLoginItems) })
         let menu = NSMenu()
         StatusMenuBuilder.fill(menu, with: items, perform: { _ in })
-        #expect(menu.items.first { $0.title == AppText.launchAtLogin }?.state == .mixed)
+        #expect(menu.items.first { $0.title == AppText.de.launchAtLogin }?.state == .mixed)
 
         let rig = Rig()
         rig.login.enabledResult = .requiresApproval
         await rig.start()
         rig.controller.toggleLaunchAtLogin()
         #expect(rig.login.calls == [true] && rig.controller.loginStatus == .requiresApproval)
-        #expect(rig.controller.status.loginMessage == LoginItemStatus.requiresApproval.hint)
+        #expect(rig.controller.status.loginMessage == LoginItemStatus.requiresApproval.hint(.de))
         rig.controller.toggleLaunchAtLogin()
         #expect(rig.login.calls == [true, false] && rig.controller.loginStatus == .disabled)
         let coordinator = AppCoordinator(controller: rig.controller)
@@ -86,11 +86,11 @@ import Testing
         await rig.start()
         rig.controller.diagnosticsCopied()
         #expect(StatusMenuModel.symbol(rig.controller.menuIcon) == "checkmark.circle")
-        #expect(rig.controller.statusLines.contains(AppText.diagnosticsCopied))
+        #expect(rig.controller.statusLines.contains(AppText.de.diagnosticsCopied))
         await rig.advance(1.6)
         #expect(StatusMenuModel.symbol(rig.controller.menuIcon) == "waveform")
         await rig.advance(3)
-        #expect(!rig.controller.statusLines.contains(AppText.diagnosticsCopied))
+        #expect(!rig.controller.statusLines.contains(AppText.de.diagnosticsCopied))
     }
 
     @Test func nsMenuIsBuiltAndRunsCommands() throws {
@@ -103,7 +103,7 @@ import Testing
         #expect(listen.keyEquivalent == " " && listen.keyEquivalentModifierMask == [.control, .option])
         _ = listen.target?.perform(listen.action, with: listen)
         let diag = try #require(menu.items.first { $0.title == "Diagnose" }?.submenu)
-        let demo = try #require(diag.items.first { $0.title == AppText.overlayDemo } as? CommandMenuItem)
+        let demo = try #require(diag.items.first { $0.title == AppText.de.overlayDemo } as? CommandMenuItem)
         _ = demo.target?.perform(demo.action, with: demo)
         #expect(ran == [.listen, .overlayDemo])
         let quit = try #require(menu.items.last)
@@ -138,8 +138,8 @@ import Testing
         let rig = Rig(token: .missing, mic: .notDetermined)
         await rig.start()
         let lines = rig.controller.statusLines
-        #expect(lines.first == AppText.ready)
-        #expect(lines.contains(AppText.tokenMissing) && lines.contains(AppText.micMissing))
+        #expect(lines.first == AppText.de.ready)
+        #expect(lines.contains(AppText.de.tokenMissing) && lines.contains(AppText.de.micMissing))
         #expect(rig.controller.menuState().attention && !rig.controller.menuState().hasIndex)
         for line in lines { #expect(styleViolations(line).isEmpty, "\(line)") }
     }
@@ -158,7 +158,9 @@ import Testing
         #expect(model.needsAttention)
         func step(_ id: OnboardingModel.StepID) -> OnboardingModel.Step { model.steps.first { $0.id == id }! }
         #expect(model.steps.map(\.id) == OnboardingModel.StepID.allCases)
-        #expect(step(.token).tone == .todo && step(.token).action?.kind == .importToken)
+        #expect(step(.token).tone == .todo && step(.token).action == nil && step(.token).status == AppText.de.tokenNone)
+        // The placeholder address leaves the field empty, so "Anmelden" waits for it.
+        #expect(model.showsSignIn && !model.showsTokenSignIn && model.address.isEmpty && !model.canLogin)
         #expect(step(.microphone).tone == .todo && step(.microphone).action?.kind == .requestMicrophone)
         #expect(step(.chrome).tone == .todo && step(.chrome).action?.kind == .requestAutomation)
         #expect(step(.speech).tone == .done)
@@ -166,9 +168,14 @@ import Testing
         #expect(step(.autostart).status.isEmpty)   // the switch says it (review U24)
         #expect(rig.permissions.micRequests == 0)
 
-        await model.perform(.importToken)
+        model.address = "https://ac.example.test"
+        model.email = "someone@example.com"
+        model.password = "not-a-real-password"
+        #expect(model.canLogin)
+        await model.login()
         await rig.settle()
-        #expect(step(.token).tone == .done && step(.token).status == AppText.tokenStored)
+        #expect(step(.token).tone == .done && !model.showsSignIn)
+        #expect(step(.token).status == "Angemeldet bei ac.example.test. Der Schlüsselbund enthält den Token.")
         await model.perform(.requestMicrophone)
         #expect(rig.permissions.micRequests == 1 && step(.microphone).tone == .done && step(.microphone).action == nil)
         await model.perform(.requestAutomation)
@@ -176,7 +183,7 @@ import Testing
         await model.perform(.runSelfTest)
         await rig.settle()
         model.rebuild()
-        #expect(step(.speech).status == AppText.selfTestPassed(ms: 812))
+        #expect(step(.speech).status == AppText.de.selfTestPassed(ms: 812))
         await model.perform(.copyStreamDeckCommands)
         #expect(copied == [AppText.streamDeckCommands(sourceRoot: nil)])
         model.setLaunchAtLogin(true)
@@ -188,15 +195,33 @@ import Testing
         }
     }
 
+    /// "Mit Token anmelden": the paste field needs an address too, and the token goes to that host's Keychain item.
+    /// "Speichern" follows the rules of "Anmelden", and a paste that cannot be saved yet stays in the field.
     @Test func pastedTokenIsSavedAndCleared() async {
         let rig = Rig(token: .missing)
         await rig.start()
         let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        model.showsTokenSignIn = true
+        #expect(!model.canSaveToken)
         model.pastedToken = "  538-abcdefghijkl \n"
+        // No address yet: the button waits, and Return says why and keeps the paste.
+        #expect(!model.canSaveToken)
+        await model.savePastedToken()
+        #expect(rig.tokens.saved.isEmpty && model.pastedToken == "  538-abcdefghijkl \n")
+        #expect(rig.controller.status.tokenMessage == AppText.de.addressMissing)
+        // An invalid address keeps it too.
+        model.address = "http://ac.example.test"
+        #expect(model.canSaveToken)
+        await model.savePastedToken()
+        #expect(rig.tokens.saved.isEmpty && !model.pastedToken.isEmpty)
+        #expect(rig.controller.status.tokenMessage == AppText.de.addressInvalid)
+        model.address = "ac.example.test"
         await model.savePastedToken()
         await rig.settle()
-        #expect(rig.tokens.saved == ["538-abcdefghijkl"] && model.pastedToken.isEmpty)
-        #expect(rig.controller.status.token == .present)
+        #expect(rig.tokens.saved == ["538-abcdefghijkl"] && rig.tokens.savedAccounts == ["ac.example.test"])
+        #expect(model.pastedToken.isEmpty && model.address == "https://ac.example.test")
+        #expect(rig.controller.status.token == .present && rig.controller.status.tokenMessage == nil)
+        #expect(!model.showsSignIn && !model.canSaveToken)
     }
 
     @Test func deniedStatesOfferSystemSettings() async {
@@ -215,7 +240,7 @@ import Testing
         rig.permissions.isChromeRunning = false
         await model.refresh()
         let idle = model.steps.first { $0.id == .chrome }!
-        #expect(idle.status == AppText.chromeNotRunning && idle.action?.enabled == false)
+        #expect(idle.status == AppText.de.chromeNotRunning && idle.action?.enabled == false)
     }
 
     @Test func failedSelfTestAsksForSpeechRecognitionOnClick() async {
@@ -286,7 +311,7 @@ import Testing
         let rig = Rig()
         await rig.start()
         rig.controller.startDemo(loop: true)
-        #expect(rig.controller.isDemoRunning && rig.controller.statusLines.contains(AppText.demoRunning))
+        #expect(rig.controller.isDemoRunning && rig.controller.statusLines.contains(AppText.de.demoRunning))
         rig.clock.advance(60)
         #expect(rig.overlay.renders.count > 15)
         await rig.press()
@@ -382,20 +407,21 @@ import Testing
     }
 
     @Test func germanTextsFollowTheStyle() {
-        for s in AppText.all { #expect(styleViolations(s).isEmpty, "\(s): \(styleViolations(s))") }
+        for s in AppText.de.all { #expect(styleViolations(s).isEmpty, "\(s): \(styleViolations(s))") }
         // Menu titles are short.
-        for s in [AppText.listen, AppText.refreshIndex, AppText.setup, AppText.launchAtLogin, AppText.diagnostics,
-                  AppText.selfTest, AppText.chromeTest, AppText.overlayDemo, AppText.copyDiagnostics, AppText.quit] {
+        for s in [AppText.de.listen, AppText.de.refreshIndex, AppText.de.setup, AppText.de.launchAtLogin, AppText.de.diagnostics,
+                  AppText.de.selfTest, AppText.de.chromeTest, AppText.de.overlayDemo, AppText.de.copyDiagnostics, AppText.de.quit] {
             #expect(s.count <= 24, "\(s)")
         }
     }
 }
 
 /// German UI style (company rules): no en or em dash, no colon or spaced dash inside a sentence, no subjunctive.
+/// The "://" of an example address is no colon in a sentence.
 func styleViolations(_ s: String) -> [String] {
     var v: [String] = []
     if s.contains("\u{2013}") || s.contains("\u{2014}") { v.append("dash") }
-    if s.contains(":"), !s.hasPrefix("cd ") { v.append("colon") }
+    if s.replacingOccurrences(of: "://", with: "").contains(":"), !s.hasPrefix("cd ") { v.append("colon") }
     if s.contains(" - ") { v.append("dash inside a sentence") }
     let lower = s.lowercased()
     for w in ["könnte", "sollte", "würde", "wäre", "hätte", "möchte"] where lower.contains(w) { v.append(w) }

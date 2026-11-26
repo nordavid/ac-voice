@@ -97,6 +97,57 @@ struct MappingTests {
         #expect(map[1] == nil)
     }
 
+    /// Fantasy companies whose names hold words an English command drops ("of", "and", "the").
+    func englishCompanies(_ paper: String = "The Paper Shop Ltd") -> IndexSnapshot {
+        var s = IndexSnapshot(baseURL: URL(string: "https://ac.example.test")!, userId: 7)
+        s.projects = [
+            ProjectRecord(id: 201, name: "BAV: Website Relaunch [AGIL]", companyId: 21),
+            ProjectRecord(id: 202, name: "XYZ: Shop Rollout [AGIL]", companyId: 22),
+            ProjectRecord(id: 203, name: "MST: Intranet [AGIL]", companyId: 23),
+            ProjectRecord(id: 204, name: "TPS: Portal [AGIL]", companyId: 24),
+            ProjectRecord(id: 205, name: "ACM: Wiki [AGIL]", companyId: 25),
+            ProjectRecord(id: 206, name: "QZ: Intern Tools [INT]", companyId: 1),
+        ]
+        s.companies = [1: CompanyRecord(name: "Beispielagentur GmbH", isOwner: true),
+                       21: CompanyRecord(name: "Bank of Avalon plc"),
+                       22: CompanyRecord(name: "Xylo Systems AG"),
+                       23: CompanyRecord(name: "Miller and Stone Ltd"),
+                       24: CompanyRecord(name: paper),
+                       25: CompanyRecord(name: "Acme IT Services Ltd")]
+        return s
+    }
+
+    func run(_ s: IndexSnapshot, _ text: String, _ language: AppLanguage) -> String {
+        let interp = Interpreter(projects: s.indexEntries(), config: Config(), history: History(), language: language)
+        return Regression.describe(interp.command([Hypothesis(text)], now: now))
+    }
+
+    @Test("English commands match company aliases without the words they drop")
+    func englishCompanyAliases() {
+        let s = englishCompanies()
+        #expect(run(s, "open Bank of Avalon", .en) == "unique 201")
+        #expect(run(s, "open Miller and Stone", .en) == "unique 203")
+        // The alias wins over the title word "Shop" of XYZ: Shop Rollout.
+        #expect(run(s, "open The Paper Shop", .en) == "unique 204")
+        // "IT" stays: the query keeps the acronym, so the alias keeps it too.
+        #expect(run(s, "open Acme IT Services", .en) == "unique 205")
+        // German matches the full aliases, as before.
+        #expect(run(s, "Öffne Bank of Avalon", .de) == "unique 201")
+        #expect(run(s, "Öffne Miller and Stone", .de) == "unique 203")
+        #expect(run(s, "Öffne The Paper Shop", .de) == "unique 204")
+        #expect(run(s, "Öffne Acme IT Services", .de) == "unique 205")
+    }
+
+    @Test("an English alias that shrinks to one word is left out")
+    func englishAliasesKeepTwoWords() {
+        // "The Shop" would become "shop" in English, a title word of XYZ: Shop Rollout.
+        let s = englishCompanies("The Shop Ltd")
+        #expect(s.companyAliasMap()[24] == ["The Shop"])
+        #expect(run(s, "open Shop", .en) == "unique 202")
+        #expect(run(s, "open Shop Rollout", .en) == "unique 202")
+        #expect(run(s, "Öffne The Shop", .de) == "unique 204")
+    }
+
     @Test("task index: open wins over archive, stale archive rows dropped, unreachable ids complete the archive")
     func taskIndex() {
         var s = snapshot()

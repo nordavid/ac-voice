@@ -65,6 +65,8 @@ public struct VoiceFlow: Sendable {
     /// whose project was not recognized (`TaskRequest.query`). A later open of a project resolved from spoken words
     /// records them as picks (REVIEW m9).
     var corrections: [String] = []
+    /// The texts of `FlowEnv.language`, taken from the env at every event (the language is fixed for an app run).
+    var texts = FlowText.de
 
     var request = 0
     var ticketWait: TicketWait?
@@ -126,18 +128,18 @@ public struct VoiceFlow: Sendable {
 
     enum Failure: Sendable {
         case notUnderstood, projectNotRecognized, nothingHeard
-        var retryText: String {
+        func retryText(_ t: FlowText) -> String {
             switch self {
-            case .notUnderstood: return FlowText.notUnderstoodRetry
-            case .projectNotRecognized: return FlowText.projectNotRecognizedRetry
-            case .nothingHeard: return FlowText.nothingHeardRetry
+            case .notUnderstood: return t.notUnderstoodRetry
+            case .projectNotRecognized: return t.projectNotRecognizedRetry
+            case .nothingHeard: return t.nothingHeardRetry
             }
         }
-        var errorText: String {
+        func errorText(_ t: FlowText) -> String {
             switch self {
-            case .notUnderstood: return FlowText.notUnderstood
-            case .projectNotRecognized: return FlowText.projectNotRecognized
-            case .nothingHeard: return FlowText.nothingHeard
+            case .notUnderstood: return t.notUnderstood
+            case .projectNotRecognized: return t.projectNotRecognized
+            case .nothingHeard: return t.nothingHeard
             }
         }
     }
@@ -156,6 +158,7 @@ public struct VoiceFlow: Sendable {
 
     public mutating func handle(_ event: FlowEvent, now: Date, env: FlowEnv) -> [Effect] {
         fx = []
+        if texts.language != env.language { texts = FlowText(env.language) }
         let c = Ctx(now: now, env: env)
         switch event {
         case .press(let p): press(p, c)
@@ -226,7 +229,7 @@ public struct VoiceFlow: Sendable {
         case let .speechFailed(g, failure):
             // Session-level: any utterance of the current session counts, an older session never (REVIEW M3).
             guard micOn, g.session == session else { break }
-            error(FlowText.failure(failure), c)
+            error(texts.failure(failure), c)
 
         case let .taskListsRevalidated(token, complete):
             guard phase == .processing, let w = ticketWait, w.token == token, w.kind == .revalidate else { break }
@@ -243,8 +246,8 @@ public struct VoiceFlow: Sendable {
             ticketWait = nil
             switch result {
             case .found(let pid): openTask(projectId: pid, taskId: taskId, number: w.request.number, learns: false, c)
-            case .notFound: error(FlowText.ticketNotFound(w.request.number), c)
-            case .failed: error(message ?? FlowText.acUnreachable, c)
+            case .notFound: error(texts.ticketNotFound(w.request.number), c)
+            case .failed: error(message ?? texts.acUnreachable, c)
             }
         case let .opened(token, result):
             guard phase == .opening, let o = opening, o.token == token else { break }
@@ -259,11 +262,11 @@ public struct VoiceFlow: Sendable {
             var hint: String?
             switch result {
             case .fallback(.denied):
-                hint = FlowText.automationHint
+                hint = texts.automationHint
             case .fallback(.undetermined) where !setupHintShown:
                 // Once per app run; the menu badge and the setup window cover the rest.
                 setupHintShown = true
-                hint = FlowText.automationSetupHint
+                hint = texts.automationSetupHint
             default:
                 break
             }
@@ -271,7 +274,7 @@ public struct VoiceFlow: Sendable {
         case .openFailed(let token):
             guard phase == .opening, let o = opening, o.token == token else { break }
             opening = nil
-            error(FlowText.openFailed, c)
+            error(texts.openFailed, c)
 
         case .timer(let id):
             guard timers[id.kind] == id.token else { break }
@@ -372,8 +375,8 @@ public struct VoiceFlow: Sendable {
     mutating func setWarming(_ warming: Bool) {
         model.warming = warming
         if warming {
-            if model.message == nil { model.message = FlowText.loadingModel }
-        } else if model.message == FlowText.loadingModel {
+            if model.message == nil { model.message = texts.loadingModel }
+        } else if model.message == texts.loadingModel {
             model.message = nil
         }
     }
@@ -407,23 +410,32 @@ public struct VoiceFlow: Sendable {
         case .listening, .retry:
             guard !finalizing else { return }
             let i = c.env.interpreter.command(hs, now: c.now)
-            if i == .cancel, LivePolicy.isStrongCancel(text) { toIdle(c); return }
-            model.preview = LivePolicy.preview(i)
-            updateHangover(timings.hangovers.command(text: LivePolicy.leading(hs), interpretation: i))
+            let language = c.env.language
+            if i == .cancel, LivePolicy.isStrongCancel(text, language: language) { toIdle(c); return }
+            model.preview = LivePolicy.preview(i, texts)
+            updateHangover(timings.hangovers.command(text: LivePolicy.leading(hs, language: language), interpretation: i,
+                                                     language: language))
         case .choices:
             extendDeadline(c)
             guard let l = list else { return }
             let out = c.env.interpreter.selection(hs, candidates: l.items.map(\.target.projectId), now: c.now)
-            if out == .cancel, LivePolicy.isStrongCancel(text) { toIdle(c); return }
+            let language = c.env.language
+            if out == .cancel, LivePolicy.isStrongCancel(text, language: language) { toIdle(c); return }
             // A new command ("Öffne … TKZ", "Ticket 4…12") follows the command rules. A dangling answer word ("die …
             // zweite") keeps the answer budget: the speech layer reopens a final that dangles (REVIEW M1).
             if !finalizing {
-                updateHangover(timings.hangovers.answer(text: LivePolicy.leading(hs), outcome: out, command: {
+                updateHangover(timings.hangovers.answer(text: LivePolicy.leading(hs, language: language), outcome: out,
+                                                        language: language, command: {
                     c.env.interpreter.command(hs, now: c.now)
                 }))
             }
             guard c.env.config.fastSelect else { return }
-            if case .pick(let i) = out {
+            // English: a live pick commits only when the leading hypothesis reads it too and its last word cannot
+            // still change it ("one" -> "one second", "second" -> "second to last"). A lagging hypothesis that still
+            // says "One" must not win over "one moment". Otherwise the final decides.
+            let lead = LivePolicy.leading(hs, language: language)
+            if case .pick(let i) = out, language == .de || (!Parser.pickMayChange(lead, language: language)
+                && c.env.interpreter.selection([Hypothesis(lead)], candidates: l.items.map(\.target.projectId), now: c.now) == out) {
                 // Two consecutive partials with the same pick commit at once (PLAN 3 fastSelect).
                 if l.pendingPick == i { pick(i, c); return }
                 list?.pendingPick = i
@@ -543,7 +555,7 @@ public struct VoiceFlow: Sendable {
                     return
                 }
             }
-            error(FlowText.nothingHeard, c)
+            error(texts.nothingHeard, c)
         case .retry:
             toIdle(c)
         default:
@@ -569,7 +581,7 @@ public struct VoiceFlow: Sendable {
     mutating func apply(_ i: Interpretation, _ hyps: [Hypothesis], _ c: Ctx) {
         switch i {
         case .myTasks:
-            open(url: c.env.config.myWorkURL, title: FlowText.myTasks, projectId: nil, c)
+            open(url: c.env.config.myWorkURL, title: texts.myTasks, projectId: nil, c)
         case .project(.unique(let s), _):
             open(url: Routes.project(c.env.config.acBaseURL, s.project.id), title: ChoiceBuilder.display(s.project),
                  projectId: s.project.id, learns: true, c)
@@ -580,7 +592,7 @@ public struct VoiceFlow: Sendable {
         case .cancel:
             toIdle(c)
         case .project, .notUnderstood:
-            if c.env.interpreter.resolver.projects.isEmpty { error(FlowText.noProjectData, c); return }
+            if c.env.interpreter.resolver.projects.isEmpty { error(texts.noProjectData, c); return }
             noteCorrection(c.env.interpreter.correctionKey(hyps))
             retryOrFail(.notUnderstood, c)
         }
@@ -627,14 +639,15 @@ public struct VoiceFlow: Sendable {
                                                archivesFetched: decideNow, attemptedArchives: attempted, now: c.now)
         // A task number resolved from spoken project words may teach a correction; a global id may not.
         let learns = req.projects != nil && req.number < TicketResolver.globalIdThreshold
-        let notFound = { message ?? FlowText.ticketNotFound(req.number, code: req.projects.flatMap { LivePolicy.commonCode($0.candidates.map(\.project)) }) }
+        let texts = texts
+        let notFound = { message ?? texts.ticketNotFound(req.number, code: req.projects.flatMap { LivePolicy.commonCode($0.candidates.map(\.project)) }) }
         switch outcome {
         case let .open(pid, tid):
             openTask(projectId: pid, taskId: tid, number: req.number, learns: learns, c)
         case .choices(let refs) where !refs.isEmpty:
             // One item is a confirm prompt: "Sag ja oder eins", "nein" closes it.
             let byId = Dictionary(c.env.interpreter.resolver.projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            let items = ChoiceBuilder.tickets(refs, projects: byId, mine: Set(c.env.index.mine.map(\.id)), now: c.now)
+            let items = ChoiceBuilder.tickets(refs, projects: byId, mine: Set(c.env.index.mine.map(\.id)), now: c.now, texts: texts)
             showList(.tickets(number: req.number, spokenProject: learns), items, c)
         case .choices, .notFound:
             error(notFound(), c)
@@ -647,7 +660,7 @@ public struct VoiceFlow: Sendable {
                 request += 1
                 ticketWait = TicketWait(request: req, token: request, kind: .archive, rounds: rounds + 1,
                                         attempted: attempted.union(pids))
-                waitForAC(FlowText.searchingTicket(req.number))
+                waitForAC(texts.searchingTicket(req.number))
                 fx.append(.fetchArchive(projectIds: pids, request: request))
                 schedule(.archive, timings.archiveWatchdog)
             }
@@ -655,11 +668,11 @@ public struct VoiceFlow: Sendable {
             request += 1
             ticketWait = TicketWait(request: req, token: request, kind: .probe(taskId: taskId), rounds: rounds,
                                     attempted: attempted)
-            waitForAC(FlowText.searchingTicket(req.number))
+            waitForAC(texts.searchingTicket(req.number))
             fx.append(.probeTask(taskId: taskId, request: request))
             schedule(.probe, timings.probeWatchdog)
         case .trashed:
-            error(FlowText.ticketTrashed, c)
+            error(texts.ticketTrashed, c)
         case .projectNotRecognized:
             noteCorrection(req.query)
             retryOrFail(.projectNotRecognized, c)
@@ -675,13 +688,13 @@ public struct VoiceFlow: Sendable {
     mutating func openTask(projectId: Int, taskId: Int, number: Int, learns: Bool, _ c: Ctx) {
         let project = c.env.interpreter.resolver.projects.first { $0.id == projectId }
         open(url: Routes.task(c.env.config.acBaseURL, projectId: projectId, taskId: taskId),
-             title: FlowText.ticketTitle(number, project: project.map(ChoiceBuilder.display)), projectId: projectId,
+             title: texts.ticketTitle(number, project: project.map(ChoiceBuilder.display)), projectId: projectId,
              learns: learns, c)
     }
 
     mutating func retryOrFail(_ f: Failure, _ c: Ctx) {
         failures += 1
-        guard micOn, failures <= timings.maxRetries else { error(f.errorText, c); return }
+        guard micOn, failures <= timings.maxRetries else { error(f.errorText(texts), c); return }
         list = nil
         ticketWait = nil
         for k: TimerKind in [.revalidate, .archive, .probe] { cancel(k) }
@@ -690,7 +703,7 @@ public struct VoiceFlow: Sendable {
         phase = .retry
         clearListModel()
         model.phase = .retry
-        model.message = f.retryText
+        model.message = f.retryText(texts)
         model.preview = nil
         model.micReady = micReady
         fx.append(.rearm(gen, mode: .command, hangover: hangover))
@@ -723,7 +736,7 @@ public struct VoiceFlow: Sendable {
         model.pageSize = l.pageSize
         model.deadline = l.deadline
         model.countdownFrozen = l.pausedRemaining
-        model.hint = l.items.count == 1 ? FlowText.sayYesOrOne : nil
+        model.hint = l.items.count == 1 ? texts.sayYesOrOne : nil
         model.hintIsAlert = false
         model.preview = nil
         model.message = nil
@@ -758,7 +771,7 @@ public struct VoiceFlow: Sendable {
         case .keepListening: rearmAnswer()
         case .unclear:
             // "die", "Nummer", "Öffne das": the gate cut a hesitation (REVIEW M1). Listen on, no failed attempt.
-            if Self.isHesitation(hyps) { rearmAnswer() } else { unclear(heard: heard, c) }
+            if Self.isHesitation(hyps, language: c.env.language) { rearmAnswer() } else { unclear(heard: heard, c) }
         case .command: command(hyps, c)
         }
     }
@@ -770,9 +783,9 @@ public struct VoiceFlow: Sendable {
     }
 
     /// Every best hypothesis (all of them when none weighs 1) holds only dangling words and lead-ins.
-    static func isHesitation(_ hyps: [Hypothesis]) -> Bool {
+    static func isHesitation(_ hyps: [Hypothesis], language: AppLanguage = .de) -> Bool {
         let best = hyps.filter { $0.weight >= 1 }
-        return (best.isEmpty ? hyps : best).allSatisfy { LivePolicy.isHesitation($0.text) }
+        return (best.isEmpty ? hyps : best).allSatisfy { LivePolicy.isHesitation($0.text, language: language) }
     }
 
     mutating func pick(_ i: Int, _ c: Ctx) {
@@ -789,7 +802,7 @@ public struct VoiceFlow: Sendable {
             var learns = false
             if case .tickets(_, let spoken) = l.kind { learns = spoken }
             open(url: Routes.task(base, projectId: pid, taskId: tid),
-                 title: FlowText.ticketTitle(number > 0 ? number : tid, project: item.displayName), projectId: pid,
+                 title: texts.ticketTitle(number > 0 ? number : tid, project: item.displayName), projectId: pid,
                  learns: learns, c)
         }
     }
@@ -812,7 +825,7 @@ public struct VoiceFlow: Sendable {
         renumbered = true
         schedule(.choicesDeadline, c.env.config.choicesWindow)
         renderList()
-        if kept.count > 1 { model.hint = FlowText.narrowed(heard, count: kept.count) }
+        if kept.count > 1 { model.hint = texts.narrowed(heard, count: kept.count) }
         if pointerInside { pauseList(c) }
         rearmAnswer()
     }
@@ -820,7 +833,7 @@ public struct VoiceFlow: Sendable {
     mutating func nextPage(_ c: Ctx) {
         guard var l = list else { return }
         guard l.pageCount > 1 else {
-            model.hint = FlowText.noMoreChoices
+            model.hint = texts.noMoreChoices
             rearmAnswer()
             return
         }
@@ -838,14 +851,14 @@ public struct VoiceFlow: Sendable {
     mutating func unclear(heard: String = "", _ c: Ctx) {
         guard var l = list else { return }
         l.unclear += 1
-        guard l.unclear <= c.env.config.maxUnclearAnswers else { error(FlowText.selectionFailed, c); return }
+        guard l.unclear <= c.env.config.maxUnclearAnswers else { error(texts.selectionFailed, c); return }
         // A held list keeps its frozen countdown; the hard cap is its deadline meanwhile.
         if l.pausedRemaining == nil {
             l.deadline = min(max(l.deadline, c.now).addingTimeInterval(timings.unclearExtension), capDate(l, c))
         }
         list = l
         model.deadline = l.deadline
-        model.hint = l.items.count == 1 ? FlowText.sayYesOrOne : FlowText.unclearAnswer(heard)
+        model.hint = l.items.count == 1 ? texts.sayYesOrOne : texts.unclearAnswer(heard)
         model.hintIsAlert = true
         scheduleDeadline(c)
         guard phase == .choices else { return }   // hard cap reached or wall clock jumped: closed
@@ -996,7 +1009,7 @@ public struct VoiceFlow: Sendable {
         model.visible = true
         model.phase = .error
         model.message = message
-        model.hint = FlowText.hint(forError: message)
+        model.hint = texts.hint(forError: message)
         model.preview = nil
         model.micReady = false
         model.warming = false
@@ -1028,12 +1041,12 @@ public struct VoiceFlow: Sendable {
         case .maxUtterance:
             if armed != nil, !finalizing, phase == .listening || phase == .retry || phase == .choices { endNow() }
         case .micStart:
-            if micOn, !micReady, phase == .listening { error(FlowText.micNotReady, c) }
+            if micOn, !micReady, phase == .listening { error(texts.micNotReady, c) }
         case .finalize:
             // The final did not come back: decide with the last partial (volatile fallback, REVIEW M2). A model that
             // never got ready heard nothing yet: say so instead of "Nichts gehört".
             guard finalizing else { break }
-            if finalizeCold, lastPartial.isEmpty { error(FlowText.modelStillLoading, c) } else { finishUtterance(lastPartial, c) }
+            if finalizeCold, lastPartial.isEmpty { error(texts.modelStillLoading, c) } else { finishUtterance(lastPartial, c) }
         case .retrySilence:
             if phase == .retry, !speechSeen { toIdle(c) }
         case .choicesDeadline:
@@ -1046,12 +1059,12 @@ public struct VoiceFlow: Sendable {
             // No answer from AC in time: decide with what is indexed; nothing found means AC did not answer.
             if phase == .processing, let w = ticketWait, w.kind == .archive {
                 resolveTicket(w.request, rounds: w.rounds, attempted: w.attempted, decideNow: true,
-                              message: FlowText.acUnreachable, c)
+                              message: texts.acUnreachable, c)
             }
         case .probe:
-            if phase == .processing, let w = ticketWait, case .probe = w.kind { error(FlowText.acUnreachable, c) }
+            if phase == .processing, let w = ticketWait, case .probe = w.kind { error(texts.acUnreachable, c) }
         case .open:
-            if phase == .opening { opening = nil; error(FlowText.chromeTimeout, c) }
+            if phase == .opening { opening = nil; error(texts.chromeTimeout, c) }
         case .success:
             if phase == .success { toIdle(c) }
         case .error:
@@ -1135,6 +1148,9 @@ public struct VoiceFlow: Sendable {
 
     /// Emits `.publish` first when the snapshot changed. `seq` and `since` are set here only.
     mutating func flush(_ c: Ctx) {
+        // The language rides along with every snapshot. It is fixed for the app run, so it never publishes one alone.
+        model.language = c.env.language
+        published.language = c.env.language
         var probe = model
         probe.seq = published.seq
         probe.since = published.since

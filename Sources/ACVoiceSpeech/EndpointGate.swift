@@ -103,6 +103,8 @@ public struct EndpointGate: Sendable, Equatable {
     }
 
     public var config: Config
+    /// Language of the voice commands, for the dangling-word rule (`Parser.looksIncomplete`).
+    public var language: AppLanguage
     public private(set) var phase = Phase.idle
     public private(set) var mode = UtteranceMode.command
     /// Pause budget from the controller, in seconds.
@@ -124,7 +126,7 @@ public struct EndpointGate: Sendable, Equatable {
     private var hasText = false
     private var lastTextChange = 0.0
 
-    public init(config: Config = .init()) { self.config = config }
+    public init(config: Config = .init(), language: AppLanguage = .de) { self.config = config; self.language = language }
 
     public var thresholdDB: Float {
         min(max((floorDB ?? -60) + config.floorOffsetDB, config.minThresholdDB), config.maxThresholdDB)
@@ -188,10 +190,10 @@ public struct EndpointGate: Sendable, Equatable {
         hasText = !dt.isEmpty || !st.isEmpty
         let lead = Self.leading(dt, st)
         // After `resume`, the same words again keep the utterance open.
-        if let rk = resumedKey, TextNorm.queryKey(TextNorm.tokenize(lead)) == rk { return }
+        if let rk = resumedKey, TextNorm.queryKey(TextNorm.tokenize(lead, language: language)) == rk { return }
         resumedKey = nil
         resumed = false
-        transcriptIncomplete = !lead.isEmpty && Parser.looksIncomplete(lead, choosing: mode == .answer)
+        transcriptIncomplete = !lead.isEmpty && Parser.looksIncomplete(lead, choosing: mode == .answer, language: language)
     }
 
     public mutating func partial(_ text: String, at t: Double) { partial(dt: text, st: "", at: t) }
@@ -209,7 +211,7 @@ public struct EndpointGate: Sendable, Equatable {
         partial(text, at: t)
         transcriptIncomplete = true
         resumed = true
-        resumedKey = TextNorm.queryKey(TextNorm.tokenize(text))
+        resumedKey = TextNorm.queryKey(TextNorm.tokenize(text, language: language))
         if t - lastVoiced >= effectiveHangover - 1e-9 { phase = .idle; return false }
         return true
     }

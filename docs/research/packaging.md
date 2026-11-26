@@ -226,6 +226,6 @@ Automation permission flow:
 - No Apple Events were sent to Chrome. No TCC entries were created and no permission prompts appeared.
 - All probe LaunchServices registrations are removed (`lsregister -dump | grep -c ac-voice` = 0).
 - The keychain search list is restored to its original state (VERIFIED). The probe keychain, private key and p12 are deleted.
-- ac-mcp and other local repositories were not touched.
+- Other local repositories were not touched.
 
 Files (all under `spikes/packaging/`): `Package.swift`, `scripts/bundle.sh`, `Sources/ACVoiceShared/{OverlayPanel,ChromeOpener,LaunchAtLogin,Log,OpenACScript.generated}.swift`, `Sources/HelloMenuBar/HelloMenuBarApp.swift`, `Sources/OverlayDemo/main.swift`, `Sources/ASBench/main.swift`, `support/open-ac.applescript`, `support/open-ac.scpt`, `support/io.github.nordavid.acvoice.plist`, `bench/*.log` (raw measurements), `bench/with-probe-keychain.sh` (probe-only).

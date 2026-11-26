@@ -136,7 +136,7 @@ import ACVoiceCore
         h.ended()
         #expect(h.phase == .processing)
         h.send(.speechResumed(h.gen!))
-        #expect(h.phase == .retry && h.model.message == FlowText.notUnderstoodRetry)
+        #expect(h.phase == .retry && h.model.message == FlowText.de.notUnderstoodRetry)
     }
 
     /// Review C1: a cough onset that the speech layer discarded counts no more: the no-speech timeout runs again
@@ -152,7 +152,7 @@ import ACVoiceCore
         #expect(h.phase == .listening && h.due(.maxUtterance) == nil && h.dueIs(.noSpeech, 4))
         #expect(h.model.transcript.isEmpty)
         h.advance(4.1)
-        #expect(h.phase == .error && h.model.message == FlowText.nothingHeard)
+        #expect(h.phase == .error && h.model.message == FlowText.de.nothingHeard)
     }
 
     @Test func discardAfterAForwardedEndListensOn() {
@@ -213,12 +213,12 @@ import ACVoiceCore
         var mic = Harness()
         mic.press()
         mic.send(.speechFailed(mic.gen!, .micDenied))
-        #expect(mic.model.message == FlowText.micDenied && mic.model.hint == FlowText.setupIsOpen)
+        #expect(mic.model.message == FlowText.de.micDenied && mic.model.hint == FlowText.de.setupIsOpen)
 
         var offline = Harness()
         offline.command("Ticket 61234")
         offline.send(.probed(request: offline.pendingRequest!, .failed))
-        #expect(offline.model.message == FlowText.acUnreachable && offline.model.hint == FlowText.checkNetwork)
+        #expect(offline.model.message == FlowText.de.acUnreachable && offline.model.hint == FlowText.de.checkNetwork)
 
         var other = Harness()
         other.command("Ticket 61234")

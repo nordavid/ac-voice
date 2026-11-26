@@ -7,6 +7,7 @@
  * attributes. No filters, masks, gradients, CSS or rgba(). The glow is faked with stacked discs.
  * Animated faces quantize time so the painter's dedupe works and frames stay small (~1-2 KB).
  */
+import { KEY_TEXTS, type Lang, linkErrorText } from "./i18n.js";
 import type { View } from "./view.js";
 
 export const SIZE = 144;
@@ -30,13 +31,8 @@ export const COLORS = {
 	red: "#FF5C5C",
 } as const;
 
-/** German captions on the key. Kept to one or two words. */
-export const KEY_TEXT = {
-	brand: "AC",
-	start: "Start",
-	starting: "Startet",
-	appMissing: "App fehlt",
-} as const;
+/** Captions on the key per language (`KEY_TEXTS`), one or two words each. */
+export { KEY_TEXTS } from "./i18n.js";
 
 /** Rotation speed of spinners and the processing arc, degrees per second. */
 const SPIN_DEG_PER_S = 300;
@@ -175,29 +171,31 @@ export function faceIdle(): string {
 	return svgDoc("idle",
 		circle(CX, CY, 50, { stroke: COLORS.cyan, strokeWidth: 2, strokeOpacity: 0.2 }) +
 			orb(CX, CY, 30, COLORS.cyan, 0.26, 0.45) +
-			text(CX, CY + 10, KEY_TEXT.brand, 28, COLORS.ink, true, 0.92),
+			text(CX, CY + 10, KEY_TEXTS.de.brand, 28, COLORS.ink, true, 0.92),
 	);
 }
 
-/** Offline: grey orb, "Start" (a press launches the app), or the launch error in red. */
-export function faceOffline(error?: string): string {
+/** Offline: grey orb, "Start" (a press launches the app), or the launch error in red. Captions in `lang`. */
+export function faceOffline(error?: string, lang: Lang = "de"): string {
+	const t = KEY_TEXTS[lang];
 	return svgDoc(error ? "missing" : "offline",
 		circle(CX, CY_CAPTION, 42, { stroke: COLORS.grey, strokeWidth: 2, strokeOpacity: 0.6 }) +
 			circle(CX, CY_CAPTION, 30, { fill: COLORS.faint }) +
-			text(CX, CY_CAPTION + 10, KEY_TEXT.brand, 28, COLORS.grey, true) +
-			(error ? caption(error, COLORS.red, 17) : caption(KEY_TEXT.start, COLORS.dim)),
+			text(CX, CY_CAPTION + 10, t.brand, 28, COLORS.grey, true) +
+			(error ? caption(linkErrorText(error, lang), COLORS.red, 17) : caption(t.start, COLORS.dim)),
 	);
 }
 
-/** Launching (or connected without a snapshot yet): grey orb with a cyan spinner. */
-export function faceLaunching(now: number): string {
+/** Launching (or connected without a snapshot yet): grey orb with a cyan spinner. Caption in `lang`. */
+export function faceLaunching(now: number, lang: Lang = "de"): string {
 	const a = spin(now);
+	const t = KEY_TEXTS[lang];
 	return svgDoc("launching",
 		circle(CX, CY_CAPTION, 42, { stroke: COLORS.faint, strokeWidth: 4 }) +
 			arc(CX, CY_CAPTION, 42, a, a + 80, COLORS.cyan, 4) +
 			circle(CX, CY_CAPTION, 30, { fill: COLORS.faint }) +
-			text(CX, CY_CAPTION + 10, KEY_TEXT.brand, 28, COLORS.grey, true) +
-			caption(KEY_TEXT.starting, COLORS.dim),
+			text(CX, CY_CAPTION + 10, t.brand, 28, COLORS.grey, true) +
+			caption(t.starting, COLORS.dim),
 	);
 }
 
@@ -273,10 +271,10 @@ export function faceError(message?: string): string {
 	);
 }
 
-/** The voice key face for a view at time `now` (epoch ms). */
+/** The voice key face for a view at time `now` (epoch ms). Captions follow `v.lang`; the app's messages come in it. */
 export function renderVoice(v: View, now: number): string {
-	if (v.link === "launching" || (v.link === "online" && !v.state)) return faceLaunching(now);
-	if (v.link === "offline" || !v.state) return faceOffline(v.linkError);
+	if (v.link === "launching" || (v.link === "online" && !v.state)) return faceLaunching(now, v.lang);
+	if (v.link === "offline" || !v.state) return faceOffline(v.linkError, v.lang);
 	const s = v.state;
 	switch (s.phase) {
 		case "idle":
@@ -315,7 +313,7 @@ export function isAnimated(v: View, now: number): boolean {
  */
 export function faceKey(v: View): string {
 	const s = v.link === "online" ? v.state : undefined;
-	return [v.link, v.linkError ?? "", s?.phase ?? "", s?.micReady ? 1 : 0, s?.choices?.length ?? 0, s?.phase === "error" ? (s.message ?? "") : "", v.windowStart ?? ""].join("|");
+	return [v.link, v.linkError ?? "", s?.phase ?? "", s?.micReady ? 1 : 0, s?.choices?.length ?? 0, s?.phase === "error" ? (s.message ?? "") : "", v.windowStart ?? "", v.lang].join("|");
 }
 
 export function toDataUrl(svg: string): string {

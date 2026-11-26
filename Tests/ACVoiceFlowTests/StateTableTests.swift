@@ -120,7 +120,7 @@ import ACVoiceCore
         #expect(h.phase == .error && h.model.message == "Ich höre nichts" && h.state.phase == .error)
         #expect(h.all.contains(.stopMic) && h.all.contains(.earcon(.error)) && !h.micOn)
         // Review U27: the next step under the error. Review U16: it holds 3.0 s.
-        #expect(h.model.hint == FlowText.tryMyTasks)
+        #expect(h.model.hint == FlowText.de.tryMyTasks)
         h.advance(2.8)
         #expect(h.phase == .error)
         h.advance(0.2)
@@ -372,7 +372,7 @@ import ACVoiceCore
         var h = Harness()
         h.command("WWT Relaunch")
         h.send(.opened(request: h.pendingRequest!, .fallback(.denied)))
-        #expect(h.phase == .success && h.model.hint == FlowText.automationHint)
+        #expect(h.phase == .success && h.model.hint == FlowText.de.automationHint)
         #expect(h.state.message == "WWT: Website Relaunch")
         #expect(h.dueIs(.success, 3.5))   // review U16: three lines to read
     }
@@ -382,7 +382,7 @@ import ACVoiceCore
         var h = Harness()
         h.command("WWT Relaunch")
         h.send(.opened(request: h.pendingRequest!, .fallback(.undetermined)))
-        #expect(h.phase == .success && h.model.hint == FlowText.automationSetupHint && h.dueIs(.success, 3.5))
+        #expect(h.phase == .success && h.model.hint == FlowText.de.automationSetupHint && h.dueIs(.success, 3.5))
         h.advance(4)
         h.command("WWT Relaunch")
         h.send(.opened(request: h.pendingRequest!, .fallback(.undetermined)))

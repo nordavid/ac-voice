@@ -187,6 +187,41 @@ final class EventLog: @unchecked Sendable {
     }
 }
 
+/// When the results of a finalize count as in (`Epoch.drained`). Speech ends at frame 16320, finalize runs through
+/// 22720 (+0.4 s at 16 kHz), as for English "Never mind".
+@Suite struct DrainTests {
+    let through: Int64 = 22720, speechEnd: Int64 = 16320, settle = 0.03
+
+    func epoch(dt: Int64, st: Int64, stVolatile: Segment? = nil) -> (epoch: Epoch, t: Double) {
+        let e = Epoch(id: 1)
+        e.record(.dt, Segment(start: 3840, end: dt, texts: ["Never mind"]), isFinal: true, finalizedThrough: dt)
+        e.record(.st, Segment(start: 0, end: st, texts: ["Never mind."]), isFinal: true, finalizedThrough: st)
+        if let v = stVolatile { e.record(.st, v, isFinal: false, finalizedThrough: st) }
+        return (e, uptime())
+    }
+
+    @Test func bothThroughTheFinalizePoint() {
+        let (e, t) = epoch(dt: 33423, st: 22720)
+        #expect(e.drained(through: through, speechEnd: speechEnd, since: t, settle: settle, now: t))
+    }
+
+    /// ST ended its final 0.36 s after the speech end and sent nothing for the silence: done after `settle`, not
+    /// after the drain timeout.
+    @Test func shortOnSilenceSettles() {
+        let (e, t) = epoch(dt: 33423, st: 22080)
+        #expect(!e.drained(through: through, speechEnd: speechEnd, since: t, settle: settle, now: t + 0.01))
+        #expect(e.drained(through: through, speechEnd: speechEnd, since: t, settle: settle, now: t + 0.03))
+    }
+
+    /// A module behind the speech end, or with volatile text, still has a final to send.
+    @Test func pendingWordsKeepWaiting() {
+        let behind = epoch(dt: 33423, st: 7680)
+        #expect(!behind.epoch.drained(through: through, speechEnd: speechEnd, since: behind.t, settle: settle, now: behind.t + 0.1))
+        let volatile = epoch(dt: 33423, st: 17000, stVolatile: Segment(start: 17000, end: 21000, texts: ["please"]))
+        #expect(!volatile.epoch.drained(through: through, speechEnd: speechEnd, since: volatile.t, settle: settle, now: volatile.t + 0.1))
+    }
+}
+
 /// `withDeadline`: the bound the self-check and the format lookup rely on.
 @Suite struct DeadlineTests {
     final class Flag: @unchecked Sendable {

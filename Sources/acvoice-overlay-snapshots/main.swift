@@ -1,15 +1,18 @@
 import Foundation
+import ACVoiceCore
 import ACVoiceUI
 
 // Renders every overlay state to PNG at 2x, offscreen (ImageRenderer, no window):
-//   acvoice-overlay-snapshots <outDir> [--only <name>[,<name>...]] [--variants]
+//   acvoice-overlay-snapshots <outDir> [--only <name>[,<name>...]] [--variants] [--lang de|en]
 // Writes <outDir>/<state>-<light|dark>.png. --variants also writes -contrast (Increase Contrast),
-// -solid (Reduce Transparency) and -still (Reduce Motion) renders.
+// -solid (Reduce Transparency) and -still (Reduce Motion) renders. --lang picks the gallery's language
+// (texts and spoken commands; default de). Use another <outDir> per language.
 
-let usage = "usage: acvoice-overlay-snapshots <outDir> [--only <name>[,<name>...]] [--variants]"
+let usage = "usage: acvoice-overlay-snapshots <outDir> [--only <name>[,<name>...]] [--variants] [--lang de|en]"
 var args = Array(CommandLine.arguments.dropFirst())
 var only: Set<String>?
 var variants = false
+var language = AppLanguage.de
 var outDir: String?
 while !args.isEmpty {
     let a = args.removeFirst()
@@ -19,6 +22,9 @@ while !args.isEmpty {
         only = Set(args.removeFirst().split(separator: ",").map(String.init))
     case "--variants":
         variants = true
+    case "--lang":
+        guard !args.isEmpty, let l = AppLanguage(rawValue: args.removeFirst().lowercased()) else { print(usage); exit(2) }
+        language = l
     case "-h", "--help":
         print(usage); exit(0)
     default:
@@ -29,13 +35,13 @@ while !args.isEmpty {
 guard let outDir else { print(usage); exit(2) }
 
 let dir = URL(fileURLWithPath: outDir, isDirectory: true)
-var scenarios = OverlayGallery.scenarios()
+var scenarios = OverlayGallery.scenarios(language: language)
 if let only {
     scenarios = scenarios.filter { only.contains($0.name) }
     let unknown = only.subtracting(scenarios.map(\.name))
     if !unknown.isEmpty {
         print("unknown state(s): \(unknown.sorted().joined(separator: ", "))")
-        print("states: \(OverlayGallery.scenarios().map(\.name).joined(separator: ", "))")
+        print("states: \(OverlayGallery.scenarios(language: language).map(\.name).joined(separator: ", "))")
         exit(2)
     }
 }

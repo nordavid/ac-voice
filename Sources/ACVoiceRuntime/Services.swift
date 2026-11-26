@@ -73,7 +73,9 @@ public protocol SpeechServing: AnyObject {
     @discardableResult func endUtteranceNow() -> Bool
     /// Microphone off.
     func stop() async
-    func selfCheck() async -> SelfCheckResult
+    /// Synthesizes a test phrase in `language` and transcribes it with that language's speech model
+    /// (`SpeechSelfCheck`). The controller passes `Controller.language`, the language the sessions listen in.
+    func selfCheck(language: AppLanguage) async -> SelfCheckResult
 }
 
 // MARK: - AC index and token
@@ -91,7 +93,7 @@ public protocol IndexServing: AnyObject {
     func revalidateTaskLists(for request: TaskRequest, activeProjectId: Int?) async -> IndexCheck
     func checkArchives(_ projectIds: [Int]) async -> IndexCheck
     func probe(taskId: Int) async throws -> TaskRef?
-    /// After a token re-import or paste: the next request loads the token again.
+    /// After a new sign-in or a pasted token: the next request loads the token again.
     func resetToken() async
 }
 
@@ -103,14 +105,16 @@ public enum StoredToken: Sendable, Equatable {
     case unreadable(String)
 }
 
-/// The AC token in the login Keychain. Never logs or returns the token itself.
+/// The AC token in the login Keychain, one item per AC host (`base`). Never logs or returns the token itself.
 @MainActor
 public protocol TokenServing: AnyObject {
-    func stored() async -> StoredToken
-    /// Reads ac-mcp (read-only) and saves its token in the Keychain. Returns the user id hint.
-    func importFromACMCP() async throws -> Int?
+    func stored(for base: URL) async -> StoredToken
+    /// Signs in: asks the AC at `base` to issue an API token for AC Voice (`ACTokenIssuer`), saves it in the Keychain
+    /// like a pasted token and returns the user id hint from the token prefix. The password lives only as long as this
+    /// call; it is never stored, logged or written anywhere. Throws `ACError`.
+    func login(base: URL, username: String, password: String) async throws -> Int?
     /// Saves a pasted token. Returns the user id hint.
-    func save(_ token: String) async throws -> Int?
+    func save(_ token: String, for base: URL) async throws -> Int?
 }
 
 // MARK: - Permissions and system state
@@ -165,8 +169,11 @@ extension IPCServer: IPCEndpoint {}
 @MainActor
 public protocol ChromeService: ChromeOpening {
     var lastActivation: (strategy: ActivationStrategy, frontmost: Bool)? { get }
+    /// The AC address changed: tabs on this origin count as AC tabs from now on.
+    func setACBaseURL(_ url: URL)
 }
 
+/// `setACBaseURL` is `ChromeOpener.setACBaseURL` (tested in ACVoiceSystemTests).
 extension ChromeOpener: ChromeService {
     public var lastActivation: (strategy: ActivationStrategy, frontmost: Bool)? { lastActivationCheck }
 }
@@ -235,6 +242,8 @@ public protocol Persisting: AnyObject {
     func save(_ history: History)
     /// Updates only the `launchAtLogin` key of config.json; other keys, unknown ones included, stay as they are.
     func saveLaunchAtLogin(_ enabled: Bool)
+    /// Updates only the `acBaseURL` key of config.json, the same way.
+    func saveACBaseURL(_ url: URL)
     /// Waits for pending writes (at quit).
     func flush()
 }
@@ -258,15 +267,19 @@ public struct Services {
     public var clock: any RuntimeClock
     public var store: any Persisting
     public var workspace: any WorkspaceObserving
+    /// `Locale.preferredLanguages` in the app; tests pass a fixed list so the language never depends on the machine.
+    public var preferredLanguages: [String]
 
     public init(speech: any SpeechServing, tokens: any TokenServing,
                 makeIndex: @escaping @MainActor (_ userId: Int, _ config: Config) -> any IndexServing,
                 permissions: any PermissionsServing, overlay: any OverlayPresenting, ipc: any IPCEndpoint,
                 chrome: any ChromeService, earcons: any EarconPlaying, hotkey: any HotkeyRegistering,
                 loginItem: any LoginItemControlling, clock: any RuntimeClock, store: any Persisting,
-                workspace: any WorkspaceObserving = NoWorkspaceEvents()) {
+                workspace: any WorkspaceObserving = NoWorkspaceEvents(),
+                preferredLanguages: [String] = Locale.preferredLanguages) {
         self.speech = speech; self.tokens = tokens; self.makeIndex = makeIndex; self.permissions = permissions
         self.overlay = overlay; self.ipc = ipc; self.chrome = chrome; self.earcons = earcons; self.hotkey = hotkey
         self.loginItem = loginItem; self.clock = clock; self.store = store; self.workspace = workspace
+        self.preferredLanguages = preferredLanguages
     }
 }
