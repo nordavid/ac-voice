@@ -38,7 +38,7 @@ import Testing
         #expect(!rig.controller.needsSetup && rig.controller.flowConfig.userId == 538)
         // A sign-in opens nothing and shows no overlay.
         #expect(rig.chrome.opened.isEmpty && rig.overlay.shows == 0 && rig.speech.starts.isEmpty)
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(tokenRow(model)?.status == Self.signedIn && tokenRow(model)?.tone == .done && !model.showsSignIn)
 
         // The flow uses the new token's user right away.
@@ -80,7 +80,7 @@ import Testing
         #expect(AppText.de.loginAddress == "AC antwortet unter dieser Adresse nicht. Prüfe die AC-Adresse.")
         #expect(AppText.de.loginRejected == "AC lehnt E-Mail oder Passwort ab.")
         // The message belongs to the form: it shows while the form is open ...
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         model.signingInAgain = true
         model.rebuild()
         #expect(tokenRow(model)?.status == AppText.de.loginFailed && tokenRow(model)?.tone == .todo)
@@ -103,7 +103,7 @@ import Testing
     @Test func passwordIsNotKeptAfterAnAttempt() async {
         let rig = Self.rig()
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(model.address == Self.address.absoluteString)   // prefilled with the configured address
         model.email = Self.user
         #expect(!model.canLogin)   // no password yet
@@ -142,7 +142,7 @@ import Testing
     @Test func passwordIsNotKeptWithoutAnAttempt() async {
         let rig = Self.rig()
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         model.email = Self.user
         model.password = Self.secret
         model.showsTokenSignIn = true
@@ -170,7 +170,7 @@ import Testing
         // Without a token the form stays after a close, but empty.
         let fresh = Self.rig()
         await fresh.start()
-        let form = OnboardingModel(controller: fresh.controller, copy: { _ in })
+        let form = OnboardingModel(controller: fresh.controller, copy: { _ in }, openURL: { _ in })
         form.password = Self.secret
         form.windowClosed()
         #expect(form.password.isEmpty && form.showsSignIn)
@@ -187,7 +187,7 @@ import Testing
     @Test func failedSignInAgainKeepsTheFormOpen() async {
         let rig = Self.rig(token: .present(userId: 538))
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(!model.showsSignIn && tokenRow(model)?.status == Self.signedIn)
         model.beginSignInAgain()
         #expect(model.showsSignIn && model.address == "https://ac.example.test")
@@ -231,7 +231,7 @@ import Testing
     @Test func signInSavesTheTypedAddressFirst() async {
         let rig = Rig(token: .missing)   // placeholder address
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(model.address.isEmpty && !model.canLogin)
         model.address = "  AC.example.test/projects/628 "
         model.email = Self.user
@@ -246,7 +246,7 @@ import Testing
         // An invalid address stops before the sign-in.
         let other = Rig(token: .missing)
         await other.start()
-        let form = OnboardingModel(controller: other.controller, copy: { _ in })
+        let form = OnboardingModel(controller: other.controller, copy: { _ in }, openURL: { _ in })
         form.address = "http://ac.example.test"
         form.email = Self.user
         form.password = Self.secret
@@ -273,7 +273,7 @@ import Testing
         #expect(rig.controller.status.token == .missing && rig.controller.index == nil && rig.controller.needsSetup)
         #expect(rig.controller.status.projects == 0 && rig.controller.env.interpreter.resolver.projects.isEmpty)
         #expect(rig.factory.made.count == 1 && old?.resets == 0)
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(tokenRow(model)?.status == AppText.de.tokenNone && model.showsSignIn)
         #expect(model.address == "https://ac.example.test")
         await rig.command("WWT Relaunch")
@@ -336,7 +336,7 @@ import Testing
         rig.controller.refreshIndexNow()
         await rig.settle()
         #expect(rig.controller.status.token == .invalid)
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(model.address == "https://ac.example.test/" && model.showsSignIn)
         model.email = Self.user
         model.password = Self.secret

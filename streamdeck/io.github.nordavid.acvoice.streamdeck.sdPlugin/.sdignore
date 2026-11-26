@@ -1,0 +1,6 @@
+# Files that `streamdeck pack` leaves out, in .gitignore syntax relative to this folder. The CLI also skips
+# .sdignore, .git, /.env*, *.log and *.js.map on its own; the entries below make the plugin's logs and Finder
+# files explicit.
+logs/
+*.log
+.DS_Store

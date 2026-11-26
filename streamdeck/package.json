@@ -18,8 +18,7 @@
 		"validate": "streamdeck validate --no-update-check io.github.nordavid.acvoice.streamdeck.sdPlugin",
 		"e2e": "node fake-host/host.mjs",
 		"check": "npm run typecheck && npm test && npm run build && npm run validate && npm run e2e",
-		"link": "streamdeck link io.github.nordavid.acvoice.streamdeck.sdPlugin",
-		"pack": "streamdeck pack io.github.nordavid.acvoice.streamdeck.sdPlugin"
+		"link": "streamdeck link io.github.nordavid.acvoice.streamdeck.sdPlugin"
 	},
 	"dependencies": {
 		"@elgato/streamdeck": "3.0.4",

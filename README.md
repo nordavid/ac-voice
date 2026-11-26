@@ -42,14 +42,66 @@ ActiveCollab URLs contain internal ids, not the ticket numbers you say. AC Voice
 
 - macOS 26 or later on Apple silicon. macOS downloads the speech model of the app language (English or German) on first use.
 - Google Chrome, logged in to ActiveCollab in a normal (not incognito) window.
-- Xcode 27 or its command line tools (Swift 6.4) to build.
-- An Apple Development signing identity (free with an Apple ID in Xcode).
 - An ActiveCollab account. You sign in with your email address and password, or with an API token for single sign-on setups.
-- Optional: the Stream Deck app 7.1 or later, and npm to build the plugin.
+- For the optional Stream Deck key, a Stream Deck and the Stream Deck app 7.1 or later.
+
+A build from source needs three more things.
+
+- Xcode 27 or its command line tools (Swift 6.4).
+- An Apple Development signing identity (free with an Apple ID in Xcode).
+- npm, to build the Stream Deck plugin.
 
 ## Installation
 
-### 1. Signing identity
+Install a release, or build AC Voice from source. Both paths end with the [first start](#first-start).
+
+### From a release
+
+Apple has not notarized the release app, and it carries only an ad-hoc signature. macOS blocks it on the first open and asks for its permissions again after every update. A [build from source](#from-source) with your own signing identity avoids both.
+
+1. Download `AC-Voice-<version>.zip` from the [releases page](https://github.com/nordavid/ac-voice/releases). By default, Safari unpacks the zip on its own and moves the zip to the Trash. Put the zip back from the Trash for step 2, and skip the double-click in step 3.
+2. To check the download, compare the SHA-256 of the zip with the checksum on the release page.
+
+   ```sh
+   shasum -a 256 ~/Downloads/AC-Voice-*.zip
+   ```
+
+3. Double-click the zip. Move `AC Voice.app` to the Applications folder before you open it the first time. If you open it in Downloads, macOS runs it from a random temporary path.
+4. Open AC Voice as described in [Open the release the first time](#open-the-release-the-first-time).
+
+Keep only one copy of `AC Voice.app`. The Stream Deck plugin starts AC Voice by its bundle id, not by a path, so `/Applications` and `~/Applications` both work. With two copies, macOS decides which one starts. `scripts/install.sh` puts a source build in `~/Applications`. Delete that copy when you switch to the release.
+
+#### Open the release the first time
+
+On the first open, macOS shows "“AC Voice” Not Opened" with the buttons "Done" and "Move to Trash". Since macOS 15, Control-click > Open no longer gets past this check. Allow AC Voice in System Settings instead.
+
+1. Double-click AC Voice in the Applications folder and click "Done".
+2. Open System Settings > Privacy & Security and scroll down to "Security". Next to "“AC Voice” was blocked to protect your Mac." click "Open Anyway". The button shows for about an hour after the blocked open.
+3. In the dialog "Open “AC Voice”?" click "Open Anyway" and enter your login password or use Touch ID.
+
+AC Voice now opens normally until the next update. On a Mac set to German, the labels read "„AC Voice“ nicht geöffnet", "Fertig", "Datenschutz & Sicherheit", "Sicherheit", "Dennoch öffnen" and "„AC Voice“ öffnen?". On a managed Mac, your administrator can block this override.
+
+If you work in Terminal, you can remove the quarantine flag instead. This skips the Gatekeeper check, so do it only for the app from the releases page of this repository.
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/AC Voice.app"
+```
+
+Then continue with the [first start](#first-start).
+
+#### Updates
+
+Quit AC Voice from its menu, replace `AC Voice.app` in the Applications folder with the new copy and open it. macOS blocks every new download of an app that Apple has not notarized. The ad-hoc signature also identifies one exact build, so macOS cannot tell that the new release is the same app. Every update repeats three steps.
+
+1. Allow the app again as described in [Open the release the first time](#open-the-release-the-first-time).
+2. Allow the microphone and Chrome control again. Menu > "Set Up…" shows which of the two is missing. If "Test Speech Recognition" then fails, click "Allow Speech Recognition".
+3. If Keychain asks for access to "AC Voice API-Token", enter your login password and choose "Always Allow".
+
+Your settings and your sign-in stay. If a permission prompt does not appear, reset the permissions as described in [Troubleshooting](#troubleshooting).
+
+### From source
+
+#### 1. Signing identity
 
 macOS ties the microphone and automation permissions to the app's signature. A stable signing identity keeps them across updates.
 
@@ -63,7 +115,7 @@ macOS ties the microphone and automation permissions to the app's signature. A s
 
 No Apple ID? Create a self-signed "Code Signing" certificate in Keychain Access (Certificate Assistant > Create a Certificate) and build with `SIGN_ID="<certificate name>"`.
 
-### 2. Build and install
+#### 2. Build and install
 
 ```sh
 git clone https://github.com/nordavid/ac-voice.git
@@ -74,7 +126,7 @@ scripts/install.sh
 
 `install.sh` builds a signed release, installs it to `~/Applications/AC Voice.app` and starts it in the background. Run it again after every update. It quits the running copy first.
 
-### 3. First start
+### First start
 
 The window "Set Up AC Voice" opens on its own. Work through its rows from top to bottom.
 
@@ -84,7 +136,7 @@ The window "Set Up AC Voice" opens on its own. Work through its rows from top to
 | **Microphone** | Click "Allow Microphone" and allow the macOS prompt. |
 | **Chrome** | Start Chrome, click "Allow Control" and allow the prompt. Without it AC Voice still works, but opens every page in a new tab. |
 | **Speech Model** | Click "Test Speech Recognition". It checks the speech model of the app language, and the row shows how fast recognition responds. If the test fails because macOS never asked for speech recognition, the row offers "Allow Speech Recognition". |
-| **Stream Deck** | Shows whether the plugin is connected. "Copy Commands" puts the install commands of [step 4](#4-stream-deck-key-optional) on the clipboard. |
+| **Stream Deck** | Shows whether the plugin is connected. In a release, "Open Release Page" opens the GitHub release of your version with the plugin file. In a source build, "Copy Commands" puts the install commands on the clipboard. See [Stream Deck key](#stream-deck-key-optional). |
 | **Autostart** | Turn on "Start at login" to start AC Voice at login. |
 
 The Microphone and Chrome rows offer "Open System Settings" after you deny a permission. For speech recognition, open System Settings > Privacy & Security > Speech Recognition yourself. Click "Done" when you are through. The text left of the button tells you how to try AC Voice, for example "Press ⌃⌥Space and say “my tasks”."
@@ -93,7 +145,13 @@ The address field replaces any manual setup. AC Voice writes the address to `con
 
 The macOS permission prompts (microphone, speech recognition, Chrome control) follow the language of macOS, not the `language` setting.
 
-### 4. Stream Deck key (optional)
+### Stream Deck key (optional)
+
+The plugin needs the Stream Deck app 7.1 or later.
+
+**From a release.** Download `io.github.nordavid.acvoice.streamdeck.streamDeckPlugin` from the release page and double-click it. The Stream Deck app installs the plugin.
+
+**From source.** Build and link the plugin, then restart the Stream Deck app.
 
 ```sh
 cd streamdeck
@@ -102,7 +160,9 @@ npm run build
 npm run link
 ```
 
-Restart the Stream Deck app, then drag the action **AC Voice** from the category "AC Voice" onto a key. One key is enough. The key shows what AC Voice does, with captions in the app language:
+Drag the action **AC Voice** from the category "AC Voice" onto a key. One key is enough. A press starts AC Voice when it is not running. Open a new release once from Finder first. Until you allow it in System Settings, a press only brings up the macOS warning.
+
+The key shows what AC Voice does, with captions in the app language:
 
 <p align="center">
   <img src="streamdeck/preview/gallery.png" width="560" alt="The Stream Deck key in its states: idle, listening, processing, list with countdown, success and error">
@@ -266,9 +326,13 @@ With `"armaturenbrett": ["cockpit"]` you can say "Armaturenbrett" for a title wi
 
 ## Troubleshooting
 
-**The app does not start after install.** Run `scripts/bundle.sh --check-identity`. A revoked certificate passes `codesign --verify` but fails at launch.
+**A source build does not start after install.** Run `scripts/bundle.sh --check-identity`. A revoked certificate passes `codesign --verify` but fails at launch.
 
-**A permission prompt never appears.** After a change of the signing identity the old permissions no longer match. Reset them and start AC Voice again:
+**macOS shows "“AC Voice” Not Opened".** macOS blocks a release on its first open and after every update. Allow it as described in [Open the release the first time](#open-the-release-the-first-time).
+
+**macOS says AC Voice "is damaged and can’t be opened".** The files of the app no longer match its signature. Delete the app, download the zip again, compare its SHA-256 with the release page and unzip it again.
+
+**A permission prompt never appears.** After an update of the release or a change of the signing identity, the old permissions no longer match. Reset them and start AC Voice again:
 
 ```sh
 tccutil reset Microphone io.github.nordavid.acvoice
@@ -286,7 +350,7 @@ tccutil reset AppleEvents io.github.nordavid.acvoice
 
 **AC Voice runs in the wrong language.** Set `language` in `config.json` to `"en"` or `"de"` and restart AC Voice.
 
-**Keychain asks for access to "AC Voice API-Token".** This happens once after a change of the signing identity. Choose "Always Allow".
+**Keychain asks for access to "AC Voice API-Token".** This happens once after a change of the signing identity, and after an update of the release. Enter your login password and choose "Always Allow".
 
 **⌃⌥Space does nothing.** macOS may use it to switch input sources. Turn that off in System Settings > Keyboard > Keyboard Shortcuts > Input Sources, or set another `hotkey`.
 

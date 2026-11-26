@@ -58,11 +58,13 @@ private func englishViolations(_ s: String) -> [String] {
         let en = AppText.en
         let labels = [en.refreshIndex, en.setup, en.launchAtLogin, en.openLoginItems, en.selfTest, en.overlayDemo,
                       en.copyDiagnostics, en.onboardingTitle, en.signIn, en.signInAgain, en.tokenSignIn, en.micRequest,
-                      en.chromeRequest, en.speechTitle, en.speechRecognitionRequest, en.streamDeckCopy]
+                      en.chromeRequest, en.speechTitle, en.speechRecognitionRequest, en.streamDeckCopy,
+                      en.streamDeckOpenRelease]
         #expect(labels == ["Refresh Index", "Set Up…", "Start at Login", "Open Login Items…", "Test Speech Recognition",
                            "Show Overlay Demo", "Copy Diagnostics", "Set Up AC Voice", "Sign In",
                            "Sign In Again or Change the Address", "Sign In with a Token", "Allow Microphone",
-                           "Allow Control", "Speech Model", "Allow Speech Recognition", "Copy Commands"])
+                           "Allow Control", "Speech Model", "Allow Speech Recognition", "Copy Commands",
+                           "Open Release Page"])
         #expect(en.speechRun == en.selfTest)
         #expect(en.launchAtLoginSwitch == "Start at login")
         #expect(AppText.de.launchAtLoginSwitch == AppText.de.launchAtLogin)
@@ -197,7 +199,7 @@ private func englishViolations(_ s: String) -> [String] {
     @Test func setupWindowInEnglish() async {
         let rig = Self.english(token: .missing)
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(model.text == AppText.en)
         let titles = model.steps.map(\.title)
         #expect(titles == ["ActiveCollab", "Microphone", "Chrome", "Speech Model", "Stream Deck", "Autostart"])
@@ -214,6 +216,35 @@ private func englishViolations(_ s: String) -> [String] {
         model.password = "wrong"
         await model.login()
         #expect(model.steps.first { $0.id == .token }?.status == "AC rejects the email or password.")
+    }
+
+    /// The Stream Deck row in both builds: a release (no source folder) opens the releases page, a source build copies
+    /// the npm commands.
+    @Test func streamDeckRowInEnglish() async {
+        let rig = Self.english()
+        await rig.start()
+        var copied: [String] = []
+        var opened: [URL] = []
+        let release = OnboardingModel(controller: rig.controller, copy: { copied.append($0) },
+                                      openURL: { opened.append($0) })
+        let releaseRow = release.steps.first { $0.id == .streamDeck }
+        #expect(releaseRow?.status == "The plugin is missing. Download the plugin file from the GitHub release and double-click it.")
+        #expect(releaseRow?.action == OnboardingModel.StepAction(kind: .openReleasePage, title: "Open Release Page", enabled: true))
+        await release.perform(.openReleasePage)
+        #expect(opened == [URL(string: "https://github.com/nordavid/ac-voice/releases")!] && copied.isEmpty)
+
+        opened = []
+        let source = OnboardingModel(controller: rig.controller, copy: { copied.append($0) },
+                                     openURL: { opened.append($0) }, sourceRoot: "/Users/x/ac voice")
+        let sourceRow = source.steps.first { $0.id == .streamDeck }
+        #expect(sourceRow?.status == "The plugin is missing. Install it with npm install, npm run build and npm run link in the folder /Users/x/ac voice/streamdeck.")
+        #expect(sourceRow?.action == OnboardingModel.StepAction(kind: .copyStreamDeckCommands, title: "Copy Commands", enabled: true))
+        await source.perform(.copyStreamDeckCommands)
+        #expect(copied == [#"cd "/Users/x/ac voice/streamdeck" && npm install && npm run build && npm run link"#])
+        #expect(opened.isEmpty)
+        for row in [releaseRow, sourceRow].compactMap({ $0 }) {
+            #expect(germanLeftovers(row.status).isEmpty && englishViolations(row.status).isEmpty, "\(row.status)")
+        }
     }
 
     /// A rejected token: the card and the menu name the next step in English.

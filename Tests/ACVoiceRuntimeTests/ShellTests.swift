@@ -152,7 +152,8 @@ import Testing
         rig.chrome.automation = .notDetermined
         await rig.start()
         var copied: [String] = []
-        let model = OnboardingModel(controller: rig.controller, copy: { copied.append($0) })
+        var opened: [URL] = []
+        let model = OnboardingModel(controller: rig.controller, copy: { copied.append($0) }, openURL: { opened.append($0) })
         await model.refresh()
         #expect(rig.chrome.preflights == [false])   // the status check never prompts
         #expect(model.needsAttention)
@@ -164,7 +165,7 @@ import Testing
         #expect(step(.microphone).tone == .todo && step(.microphone).action?.kind == .requestMicrophone)
         #expect(step(.chrome).tone == .todo && step(.chrome).action?.kind == .requestAutomation)
         #expect(step(.speech).tone == .done)
-        #expect(step(.streamDeck).action?.kind == .copyStreamDeckCommands)
+        #expect(step(.streamDeck).action?.kind == .openReleasePage)   // no source folder, as in a release
         #expect(step(.autostart).status.isEmpty)   // the switch says it (review U24)
         #expect(rig.permissions.micRequests == 0)
 
@@ -184,8 +185,8 @@ import Testing
         await rig.settle()
         model.rebuild()
         #expect(step(.speech).status == AppText.de.selfTestPassed(ms: 812))
-        await model.perform(.copyStreamDeckCommands)
-        #expect(copied == [AppText.streamDeckCommands(sourceRoot: nil)])
+        await model.perform(.openReleasePage)
+        #expect(opened == [AppText.releasesURL] && copied.isEmpty)
         model.setLaunchAtLogin(true)
         #expect(model.launchAtLogin && step(.autostart).tone == .done && rig.store.launchAtLogin == [true])
         #expect(!model.needsAttention)
@@ -200,7 +201,7 @@ import Testing
     @Test func pastedTokenIsSavedAndCleared() async {
         let rig = Rig(token: .missing)
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         model.showsTokenSignIn = true
         #expect(!model.canSaveToken)
         model.pastedToken = "  538-abcdefghijkl \n"
@@ -228,7 +229,7 @@ import Testing
         let rig = Rig(mic: .denied)
         rig.chrome.automation = .denied
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         await model.refresh()
         let mic = model.steps.first { $0.id == .microphone }!
         let chrome = model.steps.first { $0.id == .chrome }!
@@ -249,7 +250,7 @@ import Testing
         await rig.start()
         rig.controller.runSelfTest()
         await rig.settle()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         let speech = model.steps.first { $0.id == .speech }!
         #expect(speech.tone == .todo && speech.action?.kind == .requestSpeechRecognition)
         #expect(rig.permissions.speechRequests == 0)
@@ -260,7 +261,7 @@ import Testing
     @Test func viewLaysOutWithoutAWindow() async {
         let rig = Rig(token: .missing, mic: .notDetermined)
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         let host = NSHostingView(rootView: OnboardingView(model: model, onDone: {}))
         host.layoutSubtreeIfNeeded()
         let size = host.fittingSize

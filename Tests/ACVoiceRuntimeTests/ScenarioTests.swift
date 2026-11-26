@@ -486,7 +486,7 @@ import Testing
         #expect(rig.controller.status.token == .invalid && rig.controller.needsSetup)
         #expect(rig.controller.statusLines.contains(AppText.de.tokenInvalid))
         #expect(rig.tokens.logins.isEmpty && rig.tokens.saved.isEmpty)
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         let row = model.steps.first { $0.id == .token }
         #expect(row?.status == AppText.de.tokenRejected && row?.tone == .todo && model.showsSignIn)
 

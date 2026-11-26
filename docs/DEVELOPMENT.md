@@ -131,15 +131,18 @@ npm run watch   # rebuild on change and restart the plugin in the Stream Deck ap
 ## Packaging
 
 ```sh
-scripts/bundle.sh                              # release build, signed, dist/AC Voice.app
-SIGN_ID=- OUT=/tmp/acvoice-dist scripts/bundle.sh   # ad hoc, for CI-like checks only
-scripts/bundle.sh --help                       # all options
+scripts/bundle.sh                                     # release build, signed, dist/AC Voice.app
+SIGN_ID=- scripts/bundle.sh --out /tmp/acvoice-adhoc  # ad hoc, no identity needed; permissions reset with every build
+scripts/release.sh                                    # the files of a GitHub release in dist/release (see Release)
+scripts/bundle.sh --help                              # all options
 ```
 
 `bundle.sh` builds the `ACVoiceApp` product and assembles `AC Voice.app`:
 
 - `Contents/MacOS/AC Voice`, `Contents/Info.plist` from `Resources/Info.plist.in` (version from the `VERSION` file, else 0.1.0, build number from the UTC time), `Contents/Resources/AppIcon.icns`, `Contents/Resources/de.lproj` and `en.lproj` (the permission prompts per macOS language, from `Resources/*.lproj/InfoPlist.strings`) and the SwiftPM resource bundles of the app's targets.
 - Hardened runtime with `Resources/ACVoice.entitlements` (`com.apple.security.device.audio-input`, `com.apple.security.automation.apple-events`). No sandbox.
+- Writes the package folder into `Info.plist` as `ACVoiceSourceRoot`, so the setup window hands out the Stream Deck commands with an absolute path. `EMBED_SOURCE_ROOT=0` leaves it out for a build that leaves this Mac, because the path contains the home folder. The setup window then offers the GitHub release of the app version with the plugin file instead. Use it only with `CONFIG=release`, because a debug build keeps such paths in its debug map.
+- A release build (`CONFIG=release`) runs `strip -S` on the executable before it signs it. This drops the debug map (the SO and OSO stabs with the absolute source and object file paths). Crash reports still show function names from the symbol table, but no file names or line numbers.
 - Signs with `SIGN_ID`, else the first valid "Apple Development" identity, after an OCSP revocation check. `SIGN_ID=-` signs ad hoc and skips the check.
 - Ends with `codesign --verify --strict` and prints the designated requirement. It never launches the app.
 
@@ -150,3 +153,36 @@ swift scripts/make-icon.swift --preview /tmp/acvoice-icon.png
 ```
 
 It writes `Resources/AppIcon.icns`. Commit the result. The build does not run the script.
+
+### Release
+
+`scripts/release.sh` builds the files of a GitHub release into `dist/release` (`--out DIR` or `OUT=DIR` for another folder). The folder then holds exactly the files to upload.
+
+- `AC-Voice-<version>.zip` holds `AC Voice.app` from `bundle.sh` with `SIGN_ID=- EMBED_SOURCE_ROOT=0 CONFIG=release HARDENED=1`, zipped with `ditto -c -k --norsrc --keepParent`.
+- `io.github.nordavid.acvoice.streamdeck.streamDeckPlugin` is the plugin from `npm run build`, `npm run validate` and `streamdeck pack`. The script packs a copy of the plugin folder, because the CLI writes the manifest of the folder it packs back in its own formatting. The `.sdignore` in the plugin folder keeps `logs/`, `*.log` and `.DS_Store` out.
+- `SHA256SUMS.txt` holds the SHA-256 of both files.
+
+The version is `VERSION=X.Y.Z` if set, else the content of a `VERSION` file in the package root, else 0.1.0, as in `bundle.sh`. The plugin's `manifest.json` must carry the same version with a fourth part (`0.1.0.0`). The script refuses a working tree with uncommitted or untracked files, so the assets match the commit you tag. `ALLOW_DIRTY=1` builds anyway, for a test run. The script builds in a temporary folder and writes to the output folder only after every check passed.
+
+- The signature verifies with `--strict`, is ad hoc without a team identifier and has the hardened runtime.
+- `Info.plist` has no `ACVoiceSourceRoot`, and `nm -ap` finds no OSO or SO entries in the executable.
+- An unpacked copy of the zip passes `codesign --verify --strict --deep`.
+- No file of the app or of the plugin package contains the package path, the home folder, the login name, a git email address (of the repository or the global one) or its domain. A hit names the file and the kind of value, not the value.
+
+The script refuses an output folder with other files in it. A `.DS_Store` from Finder does not count. With `--force` it replaces the files of an earlier run of the same version. The files of another version count as other files. A relative `--out` counts from the current folder. `--dry-run` checks the working tree, the version and the output folder and prints the steps.
+
+A release is always signed ad hoc, and the script refuses any other `SIGN_ID`. An Apple Development certificate carries a personal email address, and the signature embeds the certificate, so everyone who downloads the zip can read it. It does not help users either. Only a Developer ID certificate plus notarization by Apple gets the app past Gatekeeper without the "Not Opened" prompt. With ad hoc, users allow the app in System Settings after every download, and macOS asks for the microphone and Chrome control again (README, "From a release").
+
+Publishing stays manual. Commit the release and push it to `main`. Run `scripts/release.sh` on that commit with a clean tree, then tag the commit and create the release. For version 0.1.0:
+
+```sh
+scripts/release.sh
+git tag -a v0.1.0 -m "AC Voice 0.1.0"
+git push origin v0.1.0
+gh release create v0.1.0 --verify-tag --title "AC Voice 0.1.0" --notes-file <release notes> \
+  dist/release/AC-Voice-0.1.0.zip \
+  dist/release/io.github.nordavid.acvoice.streamdeck.streamDeckPlugin \
+  dist/release/SHA256SUMS.txt
+```
+
+Name the three files one by one, never `dist/release/*`.

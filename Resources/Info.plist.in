@@ -3,8 +3,9 @@
 <!--
   Template for "AC Voice.app/Contents/Info.plist", rendered by scripts/bundle.sh.
   Placeholders: @VERSION@ (VERSION file, else 0.1.0) and @BUILD_NUMBER@ (UTC timestamp, or $BUILD_NUMBER).
-  bundle.sh also adds ACVoiceSourceRoot (the package folder) for the setup window's Stream Deck commands, and copies
-  Resources/de.lproj and Resources/en.lproj (InfoPlist.strings) into Contents/Resources.
+  bundle.sh also adds ACVoiceSourceRoot (the package folder) for the setup window's Stream Deck commands, except with
+  EMBED_SOURCE_ROOT=0 (scripts/release.sh), and copies Resources/de.lproj and Resources/en.lproj (InfoPlist.strings)
+  into Contents/Resources.
   The usage descriptions appear in the macOS permission prompts. The lproj folders hold them in German and English, and
   macOS picks one by the system language (config.json "language" does not reach these prompts). The English texts
   below are the fallback. The development region is English, so every other system language gets English, as in the

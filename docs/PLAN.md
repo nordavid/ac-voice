@@ -341,9 +341,10 @@ Setup window (SwiftUI in an NSWindow, the app activates only for it) with one ro
 E-Mail, Passwort, "Anmelden", collapsed "Mit Token anmelden"), Mikrofon, Chrome, Sprachmodell, Stream Deck, Autostart. It opens by itself when the token or the microphone permission is
 missing, or when Chrome runs with Automation not determined (once per run). While it is open it re-reads the statuses
 when Chrome starts or quits and when it becomes key again (back from System Settings). "Befehle kopieren" uses the
-absolute source folder (`ACVoiceSourceRoot`, written by bundle.sh). `acvoice://press|cancel|setup`. `--demo` and
-"Overlay vorführen" first run a scripted command through the real reducer with real timings and fake speech
-events, then cycle `OverlayGallery`, without any other service. SIGTERM quits like the menu (install.sh).
+absolute source folder (`ACVoiceSourceRoot`, written by bundle.sh). A release build has no source folder, so its Stream
+Deck row offers "Release-Seite öffnen" (the GitHub release of the app version) instead. `acvoice://press|cancel|setup`.
+`--demo` and "Overlay vorführen" first run a scripted command through the real reducer with real timings and fake
+speech events, then cycle `OverlayGallery`, without any other service. SIGTERM quits like the menu (install.sh).
 
 Changes to the research AppleScript `open-ac.applescript`:
 - If the reused tab's URL already equals the target, skip `set URL` and only focus the tab. This avoids an SPA reload.

@@ -250,18 +250,33 @@ public struct AppText: Sendable, Equatable {
           "The plugin is missing. Install it with npm install, npm run build and npm run link in the folder \(folder).")
     }
     public var streamDeckCopy: String { t("Befehle kopieren", "Copy Commands") }
-    /// The Info.plist key bundle.sh writes the source folder to (the folder with Package.swift).
-    public static let sourceRootKey = "ACVoiceSourceRoot"
-    /// The plugin's folder: the absolute path when the bundle knows its sources, else a hint.
-    public static func streamDeckFolder(sourceRoot: String?) -> String {
-        sourceRoot.map { ($0 as NSString).appendingPathComponent("streamdeck") } ?? "ac-voice/streamdeck"
+    /// A release build has no source folder: the plugin file comes from the GitHub release.
+    public var streamDeckMissingRelease: String {
+        t("Das Plugin fehlt. Lade die Plugin-Datei aus dem GitHub-Release und öffne sie mit einem Doppelklick.",
+          "The plugin is missing. Download the plugin file from the GitHub release and double-click it.")
     }
-    /// The commands "Befehle kopieren" puts on the pasteboard. Without a known source folder the user runs them in
-    /// ac-voice/streamdeck.
-    public static func streamDeckCommands(sourceRoot: String?) -> String {
-        let build = "npm install && npm run build && npm run link"
-        guard let sourceRoot else { return "cd ac-voice/streamdeck && " + build }
-        return "cd \"\(streamDeckFolder(sourceRoot: sourceRoot))\" && " + build
+    public var streamDeckOpenRelease: String { t("Release-Seite öffnen", "Open Release Page") }
+    /// The repository's list of all releases.
+    public static let releasesURL = URL(string: "https://github.com/nordavid/ac-voice/releases")!
+    /// The release of `version` (tag vX.Y.Z) with the app and the plugin file of the same version. The setup window of
+    /// a release build opens it, so an older app never gets a newer plugin. Without a version of three numbers (a
+    /// bare `swift run` has no Info.plist), the list of all releases.
+    public static func releasePageURL(version: String?) -> URL {
+        let parts = version?.split(separator: ".", omittingEmptySubsequences: false) ?? []
+        guard let version, parts.count == 3,
+              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy { ("0"..."9").contains($0) } }) else { return releasesURL }
+        return URL(string: "https://github.com/nordavid/ac-voice/releases/tag/v\(version)")!
+    }
+    /// The Info.plist key bundle.sh writes the source folder to (the folder with Package.swift). Only a source build
+    /// has it: a release build leaves it out (bundle.sh with EMBED_SOURCE_ROOT=0).
+    public static let sourceRootKey = "ACVoiceSourceRoot"
+    /// The plugin's folder in the source folder.
+    public static func streamDeckFolder(sourceRoot: String) -> String {
+        (sourceRoot as NSString).appendingPathComponent("streamdeck")
+    }
+    /// The commands "Befehle kopieren" puts on the pasteboard in a source build.
+    public static func streamDeckCommands(sourceRoot: String) -> String {
+        "cd \"\(streamDeckFolder(sourceRoot: sourceRoot))\" && npm install && npm run build && npm run link"
     }
 
     public var autostartTitle: String { "Autostart" }
@@ -336,8 +351,8 @@ public struct AppText: Sendable, Equatable {
          loginAddress, loginFailed, addressInvalid, addressMissing, micTitle, micGranted, micNotDetermined, micDenied,
          micRequest, chromeTitle, chromeGranted, chromeNotDetermined, chromeDenied, chromeNotRunning,
          chromeUnknown, chromeRequest, speechTitle, speechReady, speechRun, speechRecognitionRequest, streamDeckTitle,
-         streamDeckConnected, streamDeckMissing(folder: "ac-voice/streamdeck"), streamDeckCopy, autostartTitle,
-         autostartOff, openSettings, checking]
+         streamDeckConnected, streamDeckMissing(folder: "ac-voice/streamdeck"), streamDeckCopy,
+         streamDeckMissingRelease, streamDeckOpenRelease, autostartTitle, autostartOff, openSettings, checking]
             + FlowPhase.allCases.flatMap { [iconLabel(phase: $0, attention: false), iconLabel(phase: $0, attention: true)] }
             + Self.sampleACErrors.map(acError)
     }

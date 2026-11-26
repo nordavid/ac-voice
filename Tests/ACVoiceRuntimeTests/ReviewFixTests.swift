@@ -245,7 +245,7 @@ import Testing
         rig.permissions.isChromeRunning = false
         rig.chrome.automation = .notDetermined
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         await model.refresh()
         #expect(model.steps.first { $0.id == .chrome }?.status == AppText.de.chromeNotRunning)
         rig.permissions.isChromeRunning = true
@@ -263,11 +263,56 @@ import Testing
         let rig = Rig(token: .missing)
         await rig.start()
         var copied: [String] = []
-        let model = OnboardingModel(controller: rig.controller, copy: { copied.append($0) }, sourceRoot: "/Users/x/ac voice")
+        var opened: [URL] = []
+        let model = OnboardingModel(controller: rig.controller, copy: { copied.append($0) },
+                                    openURL: { opened.append($0) }, sourceRoot: "/Users/x/ac voice")
+        let row = model.steps.first { $0.id == .streamDeck }
+        #expect(row?.status == "Das Plugin fehlt. Installiere es mit npm install, npm run build und npm run link im Ordner /Users/x/ac voice/streamdeck.")
+        #expect(row?.tone == .info)
+        #expect(row?.action == OnboardingModel.StepAction(kind: .copyStreamDeckCommands, title: "Befehle kopieren", enabled: true))
         await model.perform(.copyStreamDeckCommands)
         #expect(copied == [#"cd "/Users/x/ac voice/streamdeck" && npm install && npm run build && npm run link"#])
-        #expect(model.steps.first { $0.id == .streamDeck }?.status.contains("/Users/x/ac voice/streamdeck") == true)
-        #expect(AppText.streamDeckCommands(sourceRoot: nil).hasPrefix("cd ac-voice/streamdeck && "))
+        #expect(opened.isEmpty)
+    }
+
+    /// A release build has no ACVoiceSourceRoot (bundle.sh with EMBED_SOURCE_ROOT=0), so there are no npm commands to
+    /// hand out. The row points to the plugin file of the GitHub release and opens the release of the app version in
+    /// the default browser, not through the Chrome opener of the AC tabs.
+    @Test func releaseBuildPointsToTheReleasePage() async {
+        let rig = Rig(token: .missing)
+        await rig.start()
+        var copied: [String] = []
+        var opened: [URL] = []
+        let model = OnboardingModel(controller: rig.controller, copy: { copied.append($0) },
+                                    openURL: { opened.append($0) }, appVersion: "0.1.0")
+        #expect(model.sourceRoot == nil)
+        let row = model.steps.first { $0.id == .streamDeck }
+        #expect(row?.status == "Das Plugin fehlt. Lade die Plugin-Datei aus dem GitHub-Release und öffne sie mit einem Doppelklick.")
+        #expect(row?.tone == .info)
+        #expect(row?.action == OnboardingModel.StepAction(kind: .openReleasePage, title: "Release-Seite öffnen", enabled: true))
+        await model.perform(.openReleasePage)
+        #expect(opened == [URL(string: "https://github.com/nordavid/ac-voice/releases/tag/v0.1.0")!])
+        #expect(AppText.releasesURL.absoluteString == "https://github.com/nordavid/ac-voice/releases")
+        // Without a source folder the copy action has nothing to copy.
+        await model.perform(.copyStreamDeckCommands)
+        #expect(copied.isEmpty && opened.count == 1)
+        #expect(rig.chrome.opened.isEmpty)
+        // A connected plugin needs no action in either build.
+        rig.fakeIPC.connectedClients = [IPCClient(id: 1, name: "streamdeck", version: "0.1.0")]
+        model.rebuild()
+        let connected = model.steps.first { $0.id == .streamDeck }
+        #expect(connected?.status == "Das Plugin ist verbunden" && connected?.tone == .done && connected?.action == nil)
+    }
+
+    /// The release page names the tag of the app version (vX.Y.Z), so the plugin file matches the app. Anything else
+    /// (no Info.plist, a two-part or non-numeric version) falls back to the list of all releases.
+    @Test func releasePageFollowsTheAppVersion() {
+        let list = "https://github.com/nordavid/ac-voice/releases"
+        #expect(AppText.releasePageURL(version: "0.1.0").absoluteString == list + "/tag/v0.1.0")
+        #expect(AppText.releasePageURL(version: "12.30.4").absoluteString == list + "/tag/v12.30.4")
+        for other in [nil, "", "dev", "0.1", "0.1.0.0", "1..2", "0.1.0-beta", "v0.1.0", "0.1.x", "١.٢.٣"] as [String?] {
+            #expect(AppText.releasePageURL(version: other).absoluteString == list, "\(other ?? "nil")")
+        }
     }
 
     /// Review U24: a stored token hides the sign-in fields behind "Neu anmelden oder Adresse ändern"; the autostart
@@ -275,7 +320,7 @@ import Testing
     @Test func rowsShowOnlyWhatIsToDo() async {
         let rig = Rig()
         await rig.start()
-        let model = OnboardingModel(controller: rig.controller, copy: { _ in })
+        let model = OnboardingModel(controller: rig.controller, copy: { _ in }, openURL: { _ in })
         #expect(!model.showsSignIn)
         model.beginSignInAgain()
         #expect(model.showsSignIn && !model.showsTokenSignIn)
@@ -288,6 +333,6 @@ import Testing
         #expect(model.tryItText == "Drück ⌃⌥Leertaste und sag „Meine Aufgaben“.")
         let missing = Rig(token: .missing)
         await missing.start()
-        #expect(OnboardingModel(controller: missing.controller, copy: { _ in }).showsSignIn)
+        #expect(OnboardingModel(controller: missing.controller, copy: { _ in }, openURL: { _ in }).showsSignIn)
     }
 }

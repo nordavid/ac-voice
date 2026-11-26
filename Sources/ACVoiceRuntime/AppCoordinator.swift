@@ -167,7 +167,8 @@ public final class AppCoordinator {
         guard let controller else { return }
         if onboarding == nil {
             onboarding = OnboardingWindowController(model: OnboardingModel(
-                controller: controller, copy: Self.copyToPasteboard,
+                controller: controller, copy: Self.copyToPasteboard, openURL: Self.openInBrowser,
+                appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                 sourceRoot: Bundle.main.object(forInfoDictionaryKey: AppText.sourceRootKey) as? String))
         }
         onboarding?.show()
@@ -189,6 +190,11 @@ public final class AppCoordinator {
     static func copyToPasteboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// A web page in the default browser. Not `ChromeOpener`: that one reuses ActiveCollab tabs in Chrome.
+    static func openInBrowser(_ url: URL) {
+        NSWorkspace.shared.open(url)
     }
 
     // MARK: Demo mode

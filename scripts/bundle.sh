@@ -18,10 +18,15 @@
 #   BUILD_NUMBER=N        CFBundleVersion (default: UTC timestamp yyyymmddHHMM)
 #   SCRATCH_PATH=DIR      passed to `swift build --scratch-path` (default: SwiftPM's .build)
 #   SWIFT=PATH            swift executable (default: swift)
+#   EMBED_SOURCE_ROOT=1|0 write the package path into Info.plist as ACVoiceSourceRoot (default 1). Use 0 with
+#                         CONFIG=release for a build that leaves this Mac: the path contains the home folder, and a
+#                         debug build keeps such paths in its debug map. The setup window then points to the plugin
+#                         file of the GitHub release instead of the npm commands. scripts/release.sh uses 0.
 #
 # Output: $OUT/AC Voice.app with Contents/MacOS/AC Voice, Info.plist rendered from Resources/Info.plist.in,
 # Resources/AppIcon.icns, Resources/de.lproj and en.lproj (the permission prompts per system language) and the SwiftPM
-# resource bundles of the app's targets. The script ends with
+# resource bundles of the app's targets. A release build drops the executable's debug map (strip -S), which holds
+# absolute source and object file paths. The script ends with
 # `codesign --verify --strict` and prints the designated requirement. It never launches the app.
 set -euo pipefail
 
@@ -35,6 +40,7 @@ PKG="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="${CONFIG:-release}"
 OUT="${OUT:-$PKG/dist}"
 HARDENED="${HARDENED:-1}"
+EMBED_SOURCE_ROOT="${EMBED_SOURCE_ROOT:-1}"
 SWIFT="${SWIFT:-swift}"
 CHECK_ONLY=0
 
@@ -56,6 +62,10 @@ done
 [ "$(id -u)" -ne 0 ] || die "do not run as root"
 case "$CONFIG" in release|debug) ;; *) die "CONFIG must be release or debug, not '$CONFIG'" ;; esac
 case "$HARDENED" in 0|1) ;; *) die "HARDENED must be 0 or 1" ;; esac
+case "$EMBED_SOURCE_ROOT" in 0|1) ;; *) die "EMBED_SOURCE_ROOT must be 0 or 1" ;; esac
+if [ "$EMBED_SOURCE_ROOT" = "0" ] && [ "$CONFIG" = "debug" ]; then
+  note "a debug build keeps absolute source paths in its debug map, so EMBED_SOURCE_ROOT=0 does not make it fit to share"
+fi
 
 # --- Version -------------------------------------------------------------------------------------------------
 if [ -z "${VERSION:-}" ]; then
@@ -200,6 +210,10 @@ mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 
 cp "$BIN_DIR/$PRODUCT" "$STAGE/Contents/MacOS/$EXECUTABLE"
 chmod 755 "$STAGE/Contents/MacOS/$EXECUTABLE"
+# The debug map (N_SO/N_OSO stabs) names the absolute source folder and the .o files in the scratch path. A release
+# build does not need it: crash reports still show function names from the symbol table, which stays, but no file
+# names or line numbers. The copy is signed below.
+if [ "$CONFIG" = "release" ]; then strip -S "$STAGE/Contents/MacOS/$EXECUTABLE"; fi
 cp "$ICON" "$STAGE/Contents/Resources/AppIcon.icns"
 for l in "${LPROJS[@]}"; do
   mkdir -p "$STAGE/Contents/Resources/$l.lproj"
@@ -212,7 +226,9 @@ sed -e "s/@VERSION@/$VERSION/g" -e "s/@BUILD_NUMBER@/$BUILD_NUMBER/g" "$PLIST_IN
 if grep -q '@[A-Z_]*@' "$STAGE/Contents/Info.plist"; then die "unrendered placeholder in Info.plist.in"; fi
 plutil -convert xml1 "$STAGE/Contents/Info.plist"
 # The source folder, so the setup window can hand out the Stream Deck commands with an absolute path.
-plutil -replace ACVoiceSourceRoot -string "$PKG" "$STAGE/Contents/Info.plist"
+if [ "$EMBED_SOURCE_ROOT" = "1" ]; then
+  plutil -replace ACVoiceSourceRoot -string "$PKG" "$STAGE/Contents/Info.plist"
+fi
 plutil -lint -s "$STAGE/Contents/Info.plist" || die "invalid Info.plist"
 [ "$(plutil -extract CFBundleExecutable raw -o - "$STAGE/Contents/Info.plist")" = "$EXECUTABLE" ] ||
   die "CFBundleExecutable in Info.plist.in does not match '$EXECUTABLE'"

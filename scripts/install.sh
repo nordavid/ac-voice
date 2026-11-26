@@ -6,7 +6,8 @@
 #   --no-open  install only, do not start the app
 #
 # Environment:
-#   SIGN_ID, SIGN_KEYCHAIN, CONFIG, VERSION, BUILD_NUMBER, SCRATCH_PATH, HARDENED  passed to scripts/bundle.sh
+#   SIGN_ID, SIGN_KEYCHAIN, CONFIG, VERSION, BUILD_NUMBER, SCRATCH_PATH, HARDENED, EMBED_SOURCE_ROOT
+#             passed to scripts/bundle.sh
 #   DEST=DIR  install directory (default ~/Applications)
 #
 # Steps:
@@ -63,7 +64,7 @@ say "1/5 build and sign (identity: ${SIGN_ID:-first valid Apple Development iden
 if [ "$DRY_RUN" = "1" ]; then
   STAGING="${TMPDIR:-/tmp}"; STAGING="${STAGING%/}/acvoice-install.XXXXXXXX"
   printf '    $ OUT=%q' "$STAGING"
-  for v in SIGN_ID SIGN_KEYCHAIN CONFIG VERSION BUILD_NUMBER SCRATCH_PATH HARDENED; do
+  for v in SIGN_ID SIGN_KEYCHAIN CONFIG VERSION BUILD_NUMBER SCRATCH_PATH HARDENED EMBED_SOURCE_ROOT; do
     if [ -n "${!v:-}" ]; then printf ' %s=%q' "$v" "${!v}"; fi
   done
   printf ' %q\n' "$PKG/scripts/bundle.sh"

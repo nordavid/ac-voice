@@ -20,7 +20,7 @@ public final class OnboardingModel {
 
     public enum ActionKind: String, Sendable, Equatable {
         case requestMicrophone, openMicrophoneSettings, requestAutomation, openAutomationSettings
-        case runSelfTest, requestSpeechRecognition, copyStreamDeckCommands, openLoginItems
+        case runSelfTest, requestSpeechRecognition, copyStreamDeckCommands, openReleasePage, openLoginItems
     }
 
     public struct StepAction: Sendable, Equatable {
@@ -58,15 +58,26 @@ public final class OnboardingModel {
 
     @ObservationIgnored private let controller: Controller
     @ObservationIgnored private let copy: @MainActor (String) -> Void
-    /// The source folder (Info.plist `ACVoiceSourceRoot`, written by bundle.sh): the Stream Deck commands use it.
+    @ObservationIgnored private let openURL: @MainActor (URL) -> Void
+    /// The app version (Info.plist `CFBundleShortVersionString`). The Stream Deck row of a release build opens the
+    /// release of this version.
+    @ObservationIgnored public let appVersion: String?
+    /// The source folder (Info.plist `ACVoiceSourceRoot`, written by bundle.sh): the Stream Deck commands use it. nil
+    /// in a release build, which has no sources, and in a bare `swift run` without an app bundle. The Stream Deck row
+    /// then points to the GitHub release.
     @ObservationIgnored public let sourceRoot: String?
     private var chromeRunning = false
     private var working: Set<StepID> = []
 
-    /// `copy`: puts text on the pasteboard (the app) or records it (tests).
-    public init(controller: Controller, copy: @escaping @MainActor (String) -> Void, sourceRoot: String? = nil) {
+    /// `copy`: puts text on the pasteboard (the app) or records it (tests). `openURL`: opens a web page in the default
+    /// browser (the app) or records it (tests). Neither has a default, so the app cannot lose its wiring unnoticed.
+    /// Without `appVersion`, the release row opens the list of all releases.
+    public init(controller: Controller, copy: @escaping @MainActor (String) -> Void,
+                openURL: @escaping @MainActor (URL) -> Void, appVersion: String? = nil, sourceRoot: String? = nil) {
         self.controller = controller
         self.copy = copy
+        self.openURL = openURL
+        self.appVersion = appVersion
         self.sourceRoot = sourceRoot
         address = Self.addressText(controller.config)
         rebuild()
@@ -157,7 +168,9 @@ public final class OnboardingModel {
             await busy(.speech) { _ = await self.services.permissions.requestSpeechRecognition() }
             controller.runSelfTest()
         case .copyStreamDeckCommands:
-            copy(AppText.streamDeckCommands(sourceRoot: sourceRoot))
+            if let sourceRoot { copy(AppText.streamDeckCommands(sourceRoot: sourceRoot)) }
+        case .openReleasePage:
+            openURL(AppText.releasePageURL(version: appVersion))
         case .openLoginItems:
             services.loginItem.openSettings()
         }
@@ -353,9 +366,15 @@ public final class OnboardingModel {
         }
     }
 
+    /// A source build hands out the npm commands for its plugin folder. A release build has no sources, so the row
+    /// sends the user to the plugin file of the GitHub release.
     private func streamDeckStep() -> Step {
         if !services.ipc.connectedClients.isEmpty {
             return Step(id: .streamDeck, title: text.streamDeckTitle, status: text.streamDeckConnected, tone: .done, action: nil)
+        }
+        guard let sourceRoot else {
+            return Step(id: .streamDeck, title: text.streamDeckTitle, status: text.streamDeckMissingRelease, tone: .info,
+                        action: StepAction(kind: .openReleasePage, title: text.streamDeckOpenRelease, enabled: true))
         }
         return Step(id: .streamDeck, title: text.streamDeckTitle,
                     status: text.streamDeckMissing(folder: AppText.streamDeckFolder(sourceRoot: sourceRoot)), tone: .info,
